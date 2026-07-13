@@ -32,6 +32,9 @@
 #define CAN_ADDR_CONDUCTOR      0x10
 #define CAN_ADDR_SCANNER_BOARD  0x60
 
+#define CAN_DYNAMIC_NODE_ID_MIN     0x02
+#define CAN_DYNAMIC_NODE_ID_MAX     0x7F
+
 // --- Тип устройства для команды INFO ---
 #define CAN_DEVICE_TYPE_SCANNER 0x05
 
@@ -130,6 +133,7 @@ void CAN_SendAck(uint16_t cmd_code);
 void CAN_SendNackPublic(uint16_t cmd_code, uint16_t error_code);
 void CAN_SendDone(uint16_t cmd_code, uint8_t device_id);
 void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len);
+void CAN_SendDataFragmented(uint16_t cmd_code, const uint8_t *data, uint8_t total_len);
 
 // --- Прототипы диагностики CAN ---
 void CAN_Diagnostics_GetSnapshot(CanDiagnostics_t *out);

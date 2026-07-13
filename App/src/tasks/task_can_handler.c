@@ -15,9 +15,10 @@
 #include "main.h"
 
 #include "task_can_handler.h"
+#include "app_config.h"
 #include "cmsis_os.h"
 #include "app_queues.h"
-#include "app_config.h"
+
 #include "can_protocol.h"
 
 
@@ -172,6 +173,48 @@ void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len)
     }
 
     CAN_QueueTxFrame(&tx);
+}
+
+// --- DATA (фрагментированная) — для строк штрихкода длиннее 6 байт ---
+// Пакет: byte0=CAN_SUB_TYPE_DATA, byte1=(seq|EOT), bytes 2..7=payload
+// EOT=0x80 на последнем фрагменте, seq 0..N для промежуточных
+void CAN_SendDataFragmented(uint16_t cmd_code, const uint8_t *data, uint8_t total_len)
+{
+    (void)cmd_code;
+
+    uint8_t offset = 0;
+    uint8_t seq = 0;
+
+    while (offset < total_len) {
+        CanTxFrame_t tx;
+        memset(&tx, 0, sizeof(tx));
+
+        tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL,
+                                       CAN_MSG_TYPE_DATA_DONE_LOG,
+                                       CAN_ADDR_CONDUCTOR,
+                                       CAN_ADDR_SCANNER_BOARD);
+        tx.header.IDE = CAN_ID_EXT;
+        tx.header.RTR = CAN_RTR_DATA;
+        tx.header.DLC = 8;
+
+        uint8_t chunk = total_len - offset;
+        if (chunk > 6) chunk = 6;
+
+        tx.data[0] = CAN_SUB_TYPE_DATA;
+        tx.data[1] = seq;
+        if (offset + chunk >= total_len) {
+            tx.data[1] |= 0x80; // EOT на последнем фрагменте
+        }
+
+        for (uint8_t i = 0; i < chunk; i++) {
+            tx.data[2 + i] = data[offset + i];
+        }
+
+        CAN_QueueTxFrame(&tx);
+
+        offset += chunk;
+        seq++;
+    }
 }
 
 

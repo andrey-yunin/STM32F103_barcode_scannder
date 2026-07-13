@@ -36,9 +36,12 @@ typedef struct {
     uint8_t  data_len;
 } ParsedCanCommand_t;
 
+#define FLAG_SCAN_UART_RX   0x04
+
 typedef struct {
-    uint8_t  command_id;
-    uint8_t  barcode[128];
+    uint16_t cmd_code;      // 0x0601 (SCAN_REQUEST) or 0x0602 (SCAN_GET_DATA)
+    uint16_t timeout_sec;   // timeout in seconds (only for SCAN_REQUEST)
+    uint8_t  barcode[128];  // result barcode
     uint8_t  barcode_len;
 } ScanResult_t;
 

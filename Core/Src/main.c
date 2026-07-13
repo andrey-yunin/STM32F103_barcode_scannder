@@ -27,6 +27,7 @@
 #include "task_can_handler.h"
 #include "task_dispatcher.h"
 #include "task_scan_controller.h"
+#include "app_flash.h"
 #include "task_watchdog.h"
 /* USER CODE END Includes */
 
@@ -142,6 +143,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
+  AppConfig_Init();
 
   /* USER CODE END 2 */
 

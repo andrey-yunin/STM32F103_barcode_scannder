@@ -9,5 +9,6 @@ extern osMessageQueueId_t dispatcher_queueHandle;
 extern osMessageQueueId_t scan_queueHandle;
 
 extern osThreadId_t task_can_handleHandle;
+extern osThreadId_t task_scan_contrHandle;
 
 #endif
