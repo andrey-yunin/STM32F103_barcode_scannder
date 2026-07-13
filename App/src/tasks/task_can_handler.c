@@ -18,8 +18,8 @@
 #include "app_config.h"
 #include "cmsis_os.h"
 #include "app_queues.h"
-
 #include "can_protocol.h"
+#include "task_watchdog.h"
 
 
 // --- Счётчики CAN diagnostics ---
@@ -271,7 +271,10 @@ void app_start_task_can_handler(void *argument)
 
     	uint32_t flags = osThreadFlagsWait(FLAG_CAN_RX | FLAG_CAN_TX,
     												osFlagsWaitAny,
-													osWaitForever);
+													APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS);
+
+    	AppWatchdog_Heartbeat(APP_WDG_CLIENT_CAN);
+
 
     	if ((flags & osFlagsError) != 0U) {
     		continue;

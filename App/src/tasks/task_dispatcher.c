@@ -20,6 +20,7 @@
 #include "app_config.h"
 #include "can_protocol.h"
 #include "app_flash.h"
+#include "task_watchdog.h"
 
 
 // --- Отправка одной метрики GET_STATUS ---
@@ -46,8 +47,10 @@ void app_start_task_dispatcher(void *argument)
     ParsedCanCommand_t parsed;
 
     for (;;) {
+    	AppWatchdog_Heartbeat(APP_WDG_CLIENT_DISPATCHER);
+
         // 1. Ожидание команды
-        if (osMessageQueueGet(dispatcher_queueHandle, &parsed, NULL, osWaitForever) != osOK) {
+        if (osMessageQueueGet(dispatcher_queueHandle, &parsed, NULL,  APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS) != osOK) {
             continue;
         }
 

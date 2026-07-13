@@ -18,6 +18,7 @@
 #include "scan_uart_driver.h"
 #include "scan_controller.h"
 #include "scan_ssi.h"
+#include "task_watchdog.h"
 
 void app_start_task_scan_controller(void *argument)
 {
@@ -36,8 +37,10 @@ void app_start_task_scan_controller(void *argument)
     ScanResult_t cmd;
 
     for (;;) {
+    	AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+
         // Ожидание команды из scan_queue (от dispatcher)
-        if (osMessageQueueGet(scan_queueHandle, &cmd, NULL, osWaitForever) != osOK) {
+        if (osMessageQueueGet(scan_queueHandle, &cmd, NULL,  APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS) != osOK) {
             continue;
         }
 
@@ -72,10 +75,19 @@ void app_start_task_scan_controller(void *argument)
         // Ожидание UART RX с таймаутом
         uint32_t timeout_ms = (cmd.timeout_sec > 0)
                               ? (uint32_t)cmd.timeout_sec * 1000
-                              : 5000;
-        uint32_t flags = osThreadFlagsWait(FLAG_SCAN_UART_RX,
-                                           osFlagsWaitAny,
-                                           timeout_ms);
+                              : 4000;
+
+        uint32_t elapsed = 0;
+        uint32_t flags;
+
+        while (elapsed < timeout_ms) {
+            AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);    // «я жив»
+            flags = osThreadFlagsWait(FLAG_SCAN_UART_RX, osFlagsWaitAny, 500);
+            if ((flags & osFlagsError) == 0) {
+                break;    // данные пришли — выходим
+            }
+            elapsed += 500;   // прошло ещё 500ms
+        }
 
         if ((flags & osFlagsError) != 0) {
             // Таймаут

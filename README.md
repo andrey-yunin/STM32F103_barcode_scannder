@@ -22,13 +22,14 @@ returning decoded barcode data to the DDS-240 Conductor over CAN.
 | UART DMA + IDLE driver | Implemented |
 | SSI protocol encoder/decoder | Implemented |
 | Scan controller state machine | Implemented |
-| Board safe-state | Pending |
-| Watchdog task | Pending |
+| Board safe-state | Implemented |
+| Watchdog task (heartbeat + IWDG) | Implemented |
 
 Latest confirmed build:
 
 ```text
-STM32CubeIDE Debug build clean after Stage 4 UART/SSI implementation.
+STM32CubeIDE Debug build clean after Stage 5 (Watchdog + safe-state).
+All firmware code complete. Waiting for physical validation (Stage 6).
 ```
 
 ## Hardware Baseline
@@ -73,7 +74,7 @@ App/src/tasks
   task_can_handler      bxCAN RX/TX transport owner
   task_dispatcher       service/domain routing and ACK/NACK policy
   task_scan_controller  scan domain task, SSI lifecycle
-  task_watchdog         supervisor placeholder
+  task_watchdog         heartbeat supervisor + IWDG refresh
 ```
 
 RTOS objects:

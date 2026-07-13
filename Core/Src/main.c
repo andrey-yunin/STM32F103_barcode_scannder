@@ -29,6 +29,7 @@
 #include "task_scan_controller.h"
 #include "app_flash.h"
 #include "task_watchdog.h"
+#include "board_safety.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -144,6 +145,7 @@ int main(void)
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   AppConfig_Init();
+  Board_EnterSafeState();
 
   /* USER CODE END 2 */
 
@@ -484,6 +486,8 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+ Board_EnterSafeState();
+
   __disable_irq();
   while (1)
   {
