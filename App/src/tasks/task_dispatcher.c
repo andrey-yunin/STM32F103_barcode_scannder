@@ -85,16 +85,15 @@ void app_start_task_dispatcher(void *argument)
         // УНИВЕРСАЛЬНЫЕ СЕРВИСНЫЕ КОМАНДЫ 0xF0xx
         // ============================================================
         case CAN_CMD_SRV_GET_DEVICE_INFO: {
-            uint8_t data[6];
-            // Пакет 1: DeviceType, FW Rev
-            data[0] = CAN_DEVICE_TYPE_SCANNER;
-            data[1] = FW_REV_MAJOR;
-            data[2] = FW_REV_MINOR;
-            data[3] = 0; // номер канала (1 scanner = 1)
-            data[4] = 0;
-            data[5] = 0;
-            CAN_SendData(parsed.cmd_code, data, 6);
-
+            uint8_t uid[12];
+            uint8_t buf[16];
+            AppConfig_GetMCU_UID(uid);
+            buf[0] = CAN_DEVICE_TYPE_SCANNER;
+            buf[1] = FW_REV_MAJOR;
+            buf[2] = FW_REV_MINOR;
+            buf[3] = 1;
+            memcpy(&buf[4], uid, 12);
+            CAN_SendDataFragmented(parsed.cmd_code, buf, 16);
             CAN_SendDone(parsed.cmd_code, 0);
             break;
         }

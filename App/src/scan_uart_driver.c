@@ -15,33 +15,29 @@
 
 extern UART_HandleTypeDef huart3;
 
-// --- DMA circular buffer + holding buffer ---
-static uint8_t dma_buffer[SCAN_UART_BUF_SIZE];
+// --- Holding buffer (IT-режим, без DMA) ---
+static uint8_t rx_buffer[SCAN_UART_BUF_SIZE];
 static uint8_t holding_buf[SCAN_UART_BUF_SIZE];
 static volatile uint16_t holding_len = 0;
 
 bool ScanUart_Init(void)
 {
-    // Инициализация USART3 уже выполнена в MX_USART3_UART_Init()
     holding_len = 0;
     return ScanUart_StartRx();
 }
 
 bool ScanUart_StartRx(void)
 {
-    // Запуск DMA single-shot: приём до IDLE, buf_size лимит
-    if (HAL_UARTEx_ReceiveToIdle_DMA(&huart3, dma_buffer, SCAN_UART_BUF_SIZE) != HAL_OK) {
+    if (HAL_UARTEx_ReceiveToIdle_IT(&huart3, rx_buffer, SCAN_UART_BUF_SIZE) != HAL_OK) {
         return false;
     }
-    // Отключаем прерывание DMA half-transfer — не нужно для IDLE
-    __HAL_DMA_DISABLE_IT(huart3.hdmarx, DMA_IT_HT);
     return true;
 }
 
 bool ScanUart_Send(const uint8_t *data, uint16_t len)
 {
     if (data == NULL || len == 0) return false;
-    return (HAL_UART_Transmit_DMA(&huart3, (uint8_t *)data, len) == HAL_OK);
+    return (HAL_UART_Transmit_IT(&huart3, (uint8_t *)data, len) == HAL_OK);
 }
 
 const uint8_t* ScanUart_GetReceived(uint16_t *out_len)
@@ -52,21 +48,15 @@ const uint8_t* ScanUart_GetReceived(uint16_t *out_len)
 }
 
 // --- IDLE callback (ISR контекст) ---
-void HAL_UARTEx_RxToIdleCallback(UART_HandleTypeDef *huart)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
     if (huart->Instance != USART3) return;
+    if (Size == 0 || Size > SCAN_UART_BUF_SIZE) return;
 
-    uint16_t received = SCAN_UART_BUF_SIZE - __HAL_DMA_GET_COUNTER(huart->hdmarx);
-    if (received == 0 || received > SCAN_UART_BUF_SIZE) return;
+    memcpy((void *)holding_buf, rx_buffer, Size);
+    holding_len = Size;
 
-    // Копирование в holding buffer (ISR, минимальное время)
-    memcpy((void *)holding_buf, dma_buffer, received);
-    holding_len = received;
+    HAL_UARTEx_ReceiveToIdle_IT(&huart3, rx_buffer, SCAN_UART_BUF_SIZE);
 
-    // Перезапуск DMA
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart3, dma_buffer, SCAN_UART_BUF_SIZE);
-    __HAL_DMA_DISABLE_IT(huart3.hdmarx, DMA_IT_HT);
-
-    // Уведомление задачи scan_controller
     osThreadFlagsSet(task_scan_contrHandle, FLAG_SCAN_UART_RX);
 }
