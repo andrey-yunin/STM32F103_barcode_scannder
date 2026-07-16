@@ -226,27 +226,63 @@ void app_start_task_can_handler(void *argument)
 	CanTxFrame_t tx_frame;
 	uint32_t txMailbox;
 
-    // --- Настройка CAN-фильтра (promiscuous: все Extended ID фреймы) ---
-    // Программная фильтрация dst_addr и DLC выполняется ниже в цикле.
-    // Аппаратный фильтр на 0/0 пропускает всё на FIFO0.
-    CAN_FilterTypeDef sFilterConfig;
-    uint32_t filter_id   = 0x00000000 | CAN_ID_EXT;
-    uint32_t filter_mask = 0x00000000 | CAN_ID_EXT;
+    // --- Настройка аппаратных CAN-фильтров ---
+    // Аппаратно принимаем только:
+    //   1) Broadcast COMMAND (dst=0x00, msg_type=COMMAND) — любой src
+    //   2) Direct COMMAND к нам (dst=CAN_ADDR_SCANNER_BOARD, msg_type=COMMAND) — любой src
+    // Всё остальное (ACK/DATA/DONE других узлов) отсекается аппаратно, CPU не просыпается.
+    //
+    // Формат filter register (STM32F1, 32-bit ID mask):
+    //   reg = (EXID << 3) | (IDE << 2) | (RTR << 1), где IDE=1 для extended, RTR=0 для data frame
+    //   Маска: 1 = must match, 0 = don't care
+    //   Нас интересуют: msg_type=EXID[25:24]→reg[28:27], dst=EXID[23:16]→reg[26:19]
 
-    sFilterConfig.FilterBank = 0;
+    #define CAN_FILTER_IDE       (1UL << 2)
+    #define CAN_FILTER_MSGTYPE_DST_MASK   (0x03FFUL << 19)  // bits [28:19]
+
+    CAN_FilterTypeDef sFilterConfig;
     sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
     sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
-    sFilterConfig.FilterIdHigh = (uint16_t)(filter_id >> 16);
-    sFilterConfig.FilterIdLow = (uint16_t)(filter_id & 0xFFFF);
-    sFilterConfig.FilterMaskIdHigh = (uint16_t)(filter_mask >> 16);
-    sFilterConfig.FilterMaskIdLow = (uint16_t)(filter_mask & 0xFFFF);
     sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
     sFilterConfig.FilterActivation = ENABLE;
     sFilterConfig.SlaveStartFilterBank = 14;
 
-    if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK) {
-    	Error_Handler();
+    // Bank 0: Broadcast COMMAND (dst=0x00, msg_type=0, любой priority/src)
+    {
+        uint32_t exid_bc = CAN_BUILD_ID(0, 0, CAN_ADDR_BROADCAST, 0);
+        uint32_t id_bc   = (exid_bc << 3) | CAN_FILTER_IDE;
+        uint32_t mask_bc = CAN_FILTER_MSGTYPE_DST_MASK | CAN_FILTER_IDE;
+
+        sFilterConfig.FilterBank = 0;
+        sFilterConfig.FilterIdHigh   = (uint16_t)(id_bc >> 16);
+        sFilterConfig.FilterIdLow    = (uint16_t)(id_bc & 0xFFFF);
+        sFilterConfig.FilterMaskIdHigh = (uint16_t)(mask_bc >> 16);
+        sFilterConfig.FilterMaskIdLow  = (uint16_t)(mask_bc & 0xFFFF);
+
+        if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK) {
+            Error_Handler();
+        }
     }
+
+    // Bank 1: Direct COMMAND к CAN_ADDR_SCANNER_BOARD (dst=0x60, msg_type=0, любой priority/src)
+    {
+        uint32_t exid_dir = CAN_BUILD_ID(0, 0, CAN_ADDR_SCANNER_BOARD, 0);
+        uint32_t id_dir   = (exid_dir << 3) | CAN_FILTER_IDE;
+        uint32_t mask_dir = CAN_FILTER_MSGTYPE_DST_MASK | CAN_FILTER_IDE;
+
+        sFilterConfig.FilterBank = 1;
+        sFilterConfig.FilterIdHigh   = (uint16_t)(id_dir >> 16);
+        sFilterConfig.FilterIdLow    = (uint16_t)(id_dir & 0xFFFF);
+        sFilterConfig.FilterMaskIdHigh = (uint16_t)(mask_dir >> 16);
+        sFilterConfig.FilterMaskIdLow  = (uint16_t)(mask_dir & 0xFFFF);
+
+        if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK) {
+            Error_Handler();
+        }
+    }
+
+    #undef CAN_FILTER_IDE
+    #undef CAN_FILTER_MSGTYPE_DST_MASK
 
     // --- Запуск CAN и активация прерываний ---
     if (HAL_CAN_Start(&hcan) != HAL_OK) {
