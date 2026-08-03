@@ -20,6 +20,7 @@
 #include "app_queues.h"
 #include "can_protocol.h"
 #include "task_watchdog.h"
+#include "app_flash.h"
 
 
 // --- Счётчики CAN diagnostics ---
@@ -88,7 +89,7 @@ static void CAN_SendNack(uint16_t cmd_code, uint16_t error_code)
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL,
                                    CAN_MSG_TYPE_NACK,
                                    CAN_ADDR_CONDUCTOR,
-                                   CAN_ADDR_SCANNER_BOARD);
+                                   (uint32_t)AppConfig_GetPerformerID());
 
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
@@ -110,7 +111,7 @@ void CAN_SendAck(uint16_t cmd_code)
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL,
                                    CAN_MSG_TYPE_ACK,
                                    CAN_ADDR_CONDUCTOR,
-                                   CAN_ADDR_SCANNER_BOARD);
+                                   (uint32_t)AppConfig_GetPerformerID());
 
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
@@ -135,7 +136,7 @@ void CAN_SendDone(uint16_t cmd_code, uint8_t device_id)
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL,
                                    CAN_MSG_TYPE_DATA_DONE_LOG,
                                    CAN_ADDR_CONDUCTOR,
-                                   CAN_ADDR_SCANNER_BOARD);
+                                   (uint32_t)AppConfig_GetPerformerID());
 
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
@@ -159,7 +160,7 @@ void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len)
     tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL,
                                    CAN_MSG_TYPE_DATA_DONE_LOG,
                                    CAN_ADDR_CONDUCTOR,
-                                   CAN_ADDR_SCANNER_BOARD);
+                                   (uint32_t)AppConfig_GetPerformerID());
 
     tx.header.IDE = CAN_ID_EXT;
     tx.header.RTR = CAN_RTR_DATA;
@@ -192,7 +193,7 @@ void CAN_SendDataFragmented(uint16_t cmd_code, const uint8_t *data, uint8_t tota
         tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL,
                                        CAN_MSG_TYPE_DATA_DONE_LOG,
                                        CAN_ADDR_CONDUCTOR,
-                                       CAN_ADDR_SCANNER_BOARD);
+                                       (uint32_t)AppConfig_GetPerformerID());
         tx.header.IDE = CAN_ID_EXT;
         tx.header.RTR = CAN_RTR_DATA;
         tx.header.DLC = 8;
@@ -227,62 +228,23 @@ void app_start_task_can_handler(void *argument)
 	uint32_t txMailbox;
 
     // --- Настройка аппаратных CAN-фильтров ---
-    // Аппаратно принимаем только:
-    //   1) Broadcast COMMAND (dst=0x00, msg_type=COMMAND) — любой src
-    //   2) Direct COMMAND к нам (dst=CAN_ADDR_SCANNER_BOARD, msg_type=COMMAND) — любой src
-    // Всё остальное (ACK/DATA/DONE других узлов) отсекается аппаратно, CPU не просыпается.
-    //
-    // Формат filter register (STM32F1, 32-bit ID mask):
-    //   reg = (EXID << 3) | (IDE << 2) | (RTR << 1), где IDE=1 для extended, RTR=0 для data frame
-    //   Маска: 1 = must match, 0 = don't care
-    //   Нас интересуют: msg_type=EXID[25:24]→reg[28:27], dst=EXID[23:16]→reg[26:19]
-
-    #define CAN_FILTER_IDE       (1UL << 2)
-    #define CAN_FILTER_MSGTYPE_DST_MASK   (0x03FFUL << 19)  // bits [28:19]
-
+    // Permissive: принимаем только 29-bit Extended ID (IDE=1).
+    // Фильтрация по NodeID и типу сообщения — программно ниже,
+    // по рантайм-адресу (корректно работает после SET_NODE_ID).
     CAN_FilterTypeDef sFilterConfig;
+    sFilterConfig.FilterBank = 0;
     sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
     sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    sFilterConfig.FilterIdHigh = 0x0000;
+    sFilterConfig.FilterIdLow = 0x0000 | (1UL << 2);  // IDE=1
+    sFilterConfig.FilterMaskIdHigh = 0x0000;
+    sFilterConfig.FilterMaskIdLow = 0x0000 | (1UL << 2);
     sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
     sFilterConfig.FilterActivation = ENABLE;
     sFilterConfig.SlaveStartFilterBank = 14;
 
-    // Bank 0: Broadcast COMMAND (dst=0x00, msg_type=0, любой priority/src)
-    {
-        uint32_t exid_bc = CAN_BUILD_ID(0, 0, CAN_ADDR_BROADCAST, 0);
-        uint32_t id_bc   = (exid_bc << 3) | CAN_FILTER_IDE;
-        uint32_t mask_bc = CAN_FILTER_MSGTYPE_DST_MASK | CAN_FILTER_IDE;
-
-        sFilterConfig.FilterBank = 0;
-        sFilterConfig.FilterIdHigh   = (uint16_t)(id_bc >> 16);
-        sFilterConfig.FilterIdLow    = (uint16_t)(id_bc & 0xFFFF);
-        sFilterConfig.FilterMaskIdHigh = (uint16_t)(mask_bc >> 16);
-        sFilterConfig.FilterMaskIdLow  = (uint16_t)(mask_bc & 0xFFFF);
-
-        if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK) {
-            Error_Handler();
-        }
-    }
-
-    // Bank 1: Direct COMMAND к CAN_ADDR_SCANNER_BOARD (dst=0x60, msg_type=0, любой priority/src)
-    {
-        uint32_t exid_dir = CAN_BUILD_ID(0, 0, CAN_ADDR_SCANNER_BOARD, 0);
-        uint32_t id_dir   = (exid_dir << 3) | CAN_FILTER_IDE;
-        uint32_t mask_dir = CAN_FILTER_MSGTYPE_DST_MASK | CAN_FILTER_IDE;
-
-        sFilterConfig.FilterBank = 1;
-        sFilterConfig.FilterIdHigh   = (uint16_t)(id_dir >> 16);
-        sFilterConfig.FilterIdLow    = (uint16_t)(id_dir & 0xFFFF);
-        sFilterConfig.FilterMaskIdHigh = (uint16_t)(mask_dir >> 16);
-        sFilterConfig.FilterMaskIdLow  = (uint16_t)(mask_dir & 0xFFFF);
-
-        if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK) {
-            Error_Handler();
-        }
-    }
-
-    #undef CAN_FILTER_IDE
-    #undef CAN_FILTER_MSGTYPE_DST_MASK
+    if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK)
+        Error_Handler();
 
     // --- Запуск CAN и активация прерываний ---
     if (HAL_CAN_Start(&hcan) != HAL_OK) {
@@ -332,7 +294,8 @@ void app_start_task_can_handler(void *argument)
     			// Программная фильтрация адреса назначения (наш ID или Broadcast)
     			uint32_t can_id = rx_frame.header.ExtId;
     			uint8_t dst_addr = CAN_GET_DST_ADDR(can_id);
-    			if (dst_addr != CAN_ADDR_SCANNER_BOARD && dst_addr != CAN_ADDR_BROADCAST) {
+    			uint8_t my_id = (uint8_t)AppConfig_GetPerformerID();
+    			if (dst_addr != my_id && dst_addr != CAN_ADDR_BROADCAST) {
     				g_can_diag.dropped_wrong_dst++;
     				continue;
     			}

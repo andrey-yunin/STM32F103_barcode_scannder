@@ -71,27 +71,27 @@ void AppConfig_Init(void)
         // Заводские настройки по умолчанию
         memset(&g_app_config, 0, sizeof(AppConfig_t));
         g_app_config.magic = APP_CONFIG_MAGIC;
-        g_app_config.node_id = 0x60;
+        g_app_config.performer_id = 0x60;
         g_app_config.checksum = CalculateChecksum(&g_app_config);
     }
 }
 
 // --- Чтение NodeID из RAM-копии ---
-uint8_t AppConfig_GetNodeID(void)
+uint32_t AppConfig_GetPerformerID(void)
 {
-    uint8_t id = 0x60;
+    uint32_t id = 0x60;
     if (osMutexAcquire(configMutex, osWaitForever) == osOK) {
-        id = g_app_config.node_id;
+        id = g_app_config.performer_id;
         osMutexRelease(configMutex);
     }
     return id;
 }
 
 // --- Запись NodeID в RAM-копию (без Flash) ---
-void AppConfig_SetNodeID(uint8_t id)
+void AppConfig_SetPerformerID(uint32_t id)
 {
     if (osMutexAcquire(configMutex, osWaitForever) == osOK) {
-        g_app_config.node_id = id;
+        g_app_config.performer_id = (uint8_t)id;
         osMutexRelease(configMutex);
     }
 }

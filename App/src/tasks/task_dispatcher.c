@@ -141,19 +141,16 @@ void app_start_task_dispatcher(void *argument)
         }
 
         case CAN_CMD_SRV_SET_NODE_ID: {
-            // --- SET_NODE_ID: смена NodeID с сохранением в Flash ---
-            uint8_t new_id = parsed.data[0];
-            if (new_id < CAN_DYNAMIC_NODE_ID_MIN || new_id > CAN_DYNAMIC_NODE_ID_MAX) {
-                CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_INVALID_PARAM);
-                break;
-            }
-
-            AppConfig_SetNodeID(new_id);
-
-            if (AppConfig_Commit()) {
-                CAN_SendDone(parsed.cmd_code, 0);
+            // --- SET_NODE_ID: канон экосистемы ---
+            // new_id из байта 2 payload (device_id); RAM-only; NACK INVALID_PARAM.
+            // ACK уже отправлен со старого адреса (в начале цикла).
+            if (parsed.device_id >= CAN_DYNAMIC_NODE_ID_MIN &&
+                parsed.device_id <= CAN_DYNAMIC_NODE_ID_MAX &&
+                parsed.device_id != CAN_ADDR_CONDUCTOR) {
+                AppConfig_SetPerformerID(parsed.device_id);
+                CAN_SendDone(parsed.cmd_code, parsed.device_id);
             } else {
-                CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_FLASH_WRITE);
+                CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_INVALID_PARAM);
             }
             break;
         }

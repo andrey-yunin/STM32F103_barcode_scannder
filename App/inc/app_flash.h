@@ -9,7 +9,7 @@
  *  Адрес: 0x0800FC00 (Page 63 для STM32F103C8, 64KB Flash, 1KB страница).
  *
  *  Структура AppConfig_t (16 байт):
- *  magic(4B) + node_id(1B) + reserved[9](9B) + checksum(2B) = 16B
+ *  magic(4B) + performer_id(1B) + reserved[9](9B) + checksum(2B) = 16B
  *
  *  Защита: recursive mutex с наследованием приоритета.
  *  Валидация: magic key + CRC16-CCITT (Modbus).
@@ -30,7 +30,7 @@
 // Размер 16 байт, кратен 4 — запись словами uint32_t.
 typedef struct {
     uint32_t magic;             // Ключ валидности (APP_CONFIG_MAGIC)
-    uint8_t  node_id;           // CAN NodeID (default 0x60)
+    uint8_t  performer_id;      // CAN NodeID (default 0x60)
     uint8_t  reserved[9];       // Резерв: SSI-параметры, baudrate и т.д.
     uint16_t checksum;          // CRC16-CCITT Modbus
 } AppConfig_t;
@@ -45,9 +45,9 @@ void AppConfig_FactoryReset(void);
 
 void AppConfig_GetMCU_UID(uint8_t *out_uid);
 
-uint8_t AppConfig_GetNodeID(void);
+uint32_t AppConfig_GetPerformerID(void);
 
-void AppConfig_SetNodeID(uint8_t id);
+void AppConfig_SetPerformerID(uint32_t id);
 
 
 #endif /* INC_APP_FLASH_H_ */

@@ -32,6 +32,16 @@ STM32CubeIDE Debug build clean after Stage 5 (Watchdog + safe-state).
 All firmware code complete. Waiting for physical validation (Stage 6).
 ```
 
+### 03.08.2026 — выравнивание к канону экосистемы (Stage 6)
+
+Прошивка приведена к канону `DDS-240_ECOSYSTEM_STANDARD.md` §3.2.4/§3.2.5 (сборка Debug — чистая):
+
+- `SET_NODE_ID` (`0xF005`): `new_id` читается из **байта 2** payload; валидация `0x02..0x7F` + `!= CAN_ADDR_CONDUCTOR (0x10)`; запись только в RAM, сохранение через `F003 COMMIT`; NACK `CAN_ERR_INVALID_PARAM 0x0006`; ACK со старого адреса → DONE с нового (task_dispatcher.c:143-156)
+- TX source: все исходящие фреймы берут адрес из рантайма `(uint32_t)AppConfig_GetPerformerID()` (5 мест, task_can_handler.c:91,113,138,162,195)
+- CAN-фильтр: один permissive-блок (банк 0, маска = IDE-бит `1<<2`, FIFO0) + программная dst-валидация по рантайм-адресу `my_id` (task_can_handler.c:229-246, 296)
+- Переименование API: `node_id` → `performer_id`, `Get/SetNodeID` → `Get/SetPerformerID` (uint32_t); default остаётся `0x60`
+- `app_flash.h` включён в `task_can_handler.c` (устранено `implicit declaration of 'AppConfig_GetPerformerID'`)
+
 ## Hardware Baseline
 
 Target MCU:
