@@ -33,6 +33,8 @@ bool ScanCtrl_StartScan(uint16_t timeout_sec);
 bool ScanCtrl_ProcessReceived(const uint8_t *data, uint16_t len);
 bool ScanCtrl_GetLastBarcode(uint8_t *out_buf, uint8_t *out_len);
 bool ScanCtrl_HandleTimeout(void);
+// End a failed UART submission without counting a scanner response timeout.
+void ScanCtrl_HandleTransportError(void);
 ScanState_t ScanCtrl_GetState(void);
 void ScanCtrl_GetStats(ScanStats_t *out);
 

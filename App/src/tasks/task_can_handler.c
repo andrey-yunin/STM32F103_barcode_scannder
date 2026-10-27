@@ -176,6 +176,54 @@ void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len)
     CAN_QueueTxFrame(&tx);
 }
 
+// --- Checked diagnostic queue admission, bounded across the entire response ---
+// Runs only in a task. CAN handler retains sole ownership of HAL_CAN.
+static bool CAN_QueueDiagnostic(CanTxFrame_t *tx, uint32_t start, uint32_t budget)
+{
+    uint32_t elapsed = osKernelGetTickCount() - start;
+    if (elapsed >= budget ||
+        osMessageQueuePut(can_tx_queueHandle, tx, 0, budget - elapsed) != osOK) {
+        ++g_can_diag.tx_queue_overflow;
+        return false;
+    }
+    osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_TX);
+    return true;
+}
+
+// --- Framed diagnostic DATA followed by DONE only if all frames were queued ---
+// Queue admission does not prove bus delivery; Studio still validates all DATA.
+bool CAN_SendDiagnosticResponse(uint16_t cmd_code, const uint8_t *data, uint16_t len)
+{
+    if (data == NULL || len == 0U || len > 768U || len % 6U != 0U) return false;
+    uint32_t budget = osKernelGetTickFreq() / 10U; // 100 ms maximum total queue wait
+    if (budget == 0U) budget = 1U;
+    uint32_t start = osKernelGetTickCount();
+    CanTxFrame_t tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.header.ExtId = CAN_BUILD_ID(CAN_PRIORITY_NORMAL, CAN_MSG_TYPE_DATA_DONE_LOG,
+                                   CAN_ADDR_CONDUCTOR, (uint32_t)AppConfig_GetPerformerID());
+    tx.header.IDE = CAN_ID_EXT;
+    tx.header.RTR = CAN_RTR_DATA;
+    tx.header.DLC = 8;
+
+    // --- Six-byte records preserve existing sequence/EOT semantics ---
+    for (uint16_t offset = 0; offset < len; offset += 6U) {
+        tx.data[0] = CAN_SUB_TYPE_DATA;
+        tx.data[1] = (uint8_t)(offset / 6U);
+        if (offset + 6U == len) tx.data[1] |= 0x80U;
+        memcpy(&tx.data[2], &data[offset], 6U);
+        if (!CAN_QueueDiagnostic(&tx, start, budget)) return false;
+    }
+
+    // --- Terminal uses the same checked queue path, selector zero ---
+    memset(tx.data, 0, sizeof(tx.data));
+    tx.data[0] = CAN_SUB_TYPE_DONE;
+    tx.data[1] = (uint8_t)cmd_code;
+    tx.data[2] = (uint8_t)(cmd_code >> 8);
+    return CAN_QueueDiagnostic(&tx, start, budget);
+}
+
+
 // --- DATA (фрагментированная) — для строк штрихкода длиннее 6 байт ---
 // Пакет: byte0=CAN_SUB_TYPE_DATA, byte1=(seq|EOT), bytes 2..7=payload
 // EOT=0x80 на последнем фрагменте, seq 0..N для промежуточных

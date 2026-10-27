@@ -43,6 +43,9 @@
 // SCAN_GET_DATA — возвращает последний раскодированный штрихкод.
 #define CAN_CMD_SCAN_REQUEST            0x0601
 #define CAN_CMD_SCAN_GET_DATA           0x0602
+// Read-only SSI revision probe, fixed 3-second raw UART capture.
+#define CAN_CMD_SCAN_BEEP 0x0604U // One short high beep; 3 s raw RX capture. No parameters.
+#define CAN_CMD_SCAN_GET_REVISION                  0x0603
 
 // --- Сервисные команды (0xF001..0xF007) ---
 #define CAN_CMD_SRV_GET_DEVICE_INFO     0xF001
@@ -52,6 +55,14 @@
 #define CAN_CMD_SRV_SET_NODE_ID         0xF005
 #define CAN_CMD_SRV_FACTORY_RESET       0xF006
 #define CAN_CMD_SRV_GET_STATUS          0xF007
+
+// --- Optional Scanner UART diagnostics: existing F020/F021 envelope ---
+#define CAN_CMD_SRV_GET_DIAG_CAPS       0xF020U
+#define CAN_CMD_SRV_GET_DIAG_BLOCK      0xF021U
+#define CAN_DIAG_BLOCK_SCANNER_UART_RX  0xD501U
+#define CAN_DIAG_SCANNER_UART_SCHEMA    1U
+#define CAN_DIAG_BLOCK_SCANNER_UART_TX_START          0xD502U
+#define CAN_DIAG_SCANNER_UART_TX_SCHEMA               1U
 
 #define SRV_MAGIC_REBOOT                0x55AA
 #define SRV_MAGIC_FACTORY_RESET         0xDEAD
@@ -134,6 +145,10 @@ void CAN_SendNackPublic(uint16_t cmd_code, uint16_t error_code);
 void CAN_SendDone(uint16_t cmd_code, uint8_t device_id);
 void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len);
 void CAN_SendDataFragmented(uint16_t cmd_code, const uint8_t *data, uint8_t total_len);
+
+// --- Checked task-context diagnostic response; no DONE after enqueue failure ---
+// True confirms queue acceptance only, not physical CAN delivery.
+bool CAN_SendDiagnosticResponse(uint16_t cmd_code, const uint8_t *data, uint16_t len);
 
 // --- Прототипы диагностики CAN ---
 void CAN_Diagnostics_GetSnapshot(CanDiagnostics_t *out);

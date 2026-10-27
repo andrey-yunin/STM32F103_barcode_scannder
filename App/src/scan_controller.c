@@ -30,7 +30,9 @@ void ScanCtrl_Init(void)
 bool ScanCtrl_StartScan(uint16_t timeout_sec)
 {
     (void)timeout_sec;
-    if (g_state != SCAN_STATE_IDLE) return false;
+    // Only an active transaction is busy. ERROR and DATA_READY retain the
+    // previous result until the next request; neither blocks a new scan.
+    if (g_state == SCAN_STATE_SCANNING) return false;
 
     g_state = SCAN_STATE_SCANNING;
     g_barcode_len = 0;
@@ -89,6 +91,11 @@ bool ScanCtrl_HandleTimeout(void)
     g_stats.scan_timeouts++;
     g_state = SCAN_STATE_ERROR;
     return true;
+}
+
+void ScanCtrl_HandleTransportError(void)
+{
+    if (g_state == SCAN_STATE_SCANNING) g_state = SCAN_STATE_ERROR;
 }
 
 ScanState_t ScanCtrl_GetState(void)

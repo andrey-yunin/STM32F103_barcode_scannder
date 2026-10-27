@@ -19,6 +19,46 @@
 #include "scan_controller.h"
 #include "scan_ssi.h"
 #include "task_watchdog.h"
+#include <string.h>
+
+// --- Read-only revision probe or single BEEP: DONE means RX capture complete ---
+static void ScanQueryRevision(uint16_t command)
+{
+    static uint8_t packet[SSI_PACKET_MAX_LEN];
+    const uint8_t beep_code = 0;
+    uint8_t length = command == CAN_CMD_SCAN_BEEP
+        ? Ssi_Encode(SSI_OP_BEEP, &beep_code, 1, packet)
+        : Ssi_Encode(SSI_OP_REQUEST_REVISION, NULL, 0, packet);
+    ScanUartCapture_t rx;
+    ScanUart_BeginCapture();
+    if (!ScanUart_Wake() || !ScanUart_Send(packet, length)) {
+        ScanUart_EndCapture(NULL);
+        CAN_SendNackPublic(command, CAN_ERR_SCAN_HARDWARE);
+        return;
+    }
+
+    // Keep the DMA TX buffer alive and capture even malformed/fragmented RX.
+    // Fixed 3 s covers the default 2 s SSI response timeout with margin.
+    uint32_t started = osKernelGetTickCount();
+    uint32_t duration = 3U * osKernelGetTickFreq();
+    while ((uint32_t)(osKernelGetTickCount() - started) < duration) {
+        AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+        osDelay((osKernelGetTickFreq() + 19U) / 20U);
+    }
+    ScanUart_EndCapture(&rx);
+
+    // v1 envelope: schema8, flags8 (bit0 overflow), length16, errors32, raw.
+    // Little-endian metadata; padding to six bytes is zero and checked by host.
+    uint8_t response[204] = {1U, 0U};
+    response[1] = rx.overflow ? 1U : 0U;
+    response[2] = (uint8_t)rx.length;
+    response[3] = (uint8_t)(rx.length >> 8);
+    for (unsigned i = 0; i < 4; ++i) response[4 + i] = (uint8_t)(rx.errors >> (8U * i));
+    memcpy(response + 8, rx.bytes, rx.length);
+    uint16_t total = (uint16_t)(((8U + rx.length + 5U) / 6U) * 6U);
+    if (!CAN_SendDiagnosticResponse(command, response, total))
+        CAN_SendNackPublic(command, CAN_ERR_DEVICE_BUSY);
+}
 
 void app_start_task_scan_controller(void *argument)
 {
@@ -32,7 +72,7 @@ void app_start_task_scan_controller(void *argument)
 
     // --- SCAN_ENABLE: однократно при старте ---
     ssi_len = Ssi_Encode(SSI_OP_SCAN_ENABLE, NULL, 0, ssi_packet);
-    ScanUart_Send(ssi_packet, ssi_len);
+    if (ScanUart_Wake()) ScanUart_Send(ssi_packet, ssi_len);
 
     ScanResult_t cmd;
 
@@ -41,6 +81,11 @@ void app_start_task_scan_controller(void *argument)
 
         // Ожидание команды из scan_queue (от dispatcher)
         if (osMessageQueueGet(scan_queueHandle, &cmd, NULL,  APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS) != osOK) {
+            continue;
+        }
+
+        if (cmd.cmd_code == CAN_CMD_SCAN_GET_REVISION || cmd.cmd_code == CAN_CMD_SCAN_BEEP) {
+            ScanQueryRevision(cmd.cmd_code);
             continue;
         }
 
@@ -70,7 +115,13 @@ void app_start_task_scan_controller(void *argument)
 
         // Отправка START_DECODE
         ssi_len = Ssi_Encode(SSI_OP_START_DECODE, NULL, 0, ssi_packet);
-        ScanUart_Send(ssi_packet, ssi_len);
+        // Retain this attempt separately from the subsequent STOP_DECODE.
+        if (!ScanUart_Wake() || !ScanUart_SendStart(ssi_packet, ssi_len)) {
+            // No accepted START: report transport failure, not a scan timeout.
+            ScanCtrl_HandleTransportError();
+            CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_HARDWARE);
+            continue;
+        }
 
         // Ожидание UART RX с таймаутом
         uint32_t timeout_ms = (cmd.timeout_sec > 0)
@@ -110,6 +161,6 @@ void app_start_task_scan_controller(void *argument)
 
         // STOP_DECODE
         ssi_len = Ssi_Encode(SSI_OP_STOP_DECODE, NULL, 0, ssi_packet);
-        ScanUart_Send(ssi_packet, ssi_len);
+        if (ScanUart_Wake()) ScanUart_Send(ssi_packet, ssi_len);
     }
 }

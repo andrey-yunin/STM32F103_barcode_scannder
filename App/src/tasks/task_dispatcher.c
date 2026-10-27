@@ -21,6 +21,7 @@
 #include "can_protocol.h"
 #include "app_flash.h"
 #include "task_watchdog.h"
+#include "scan_uart_driver.h"
 
 
 // --- Отправка одной метрики GET_STATUS ---
@@ -37,6 +38,98 @@ static void SendStatusMetric(uint16_t cmd_code, uint16_t metric_id, uint32_t val
     data[5] = (uint8_t)((value >> 24) & 0xFF);
 
     CAN_SendData(cmd_code, data, sizeof(data));
+}
+
+
+// --- Encode one standard diagnostic record (item:uint16, value:uint32 LE) ---
+static void PackDiagnostic(uint8_t *out, uint16_t item, uint32_t value)
+{
+    out[0] = (uint8_t)item;
+    out[1] = (uint8_t)(item >> 8);
+    for (uint8_t i = 0; i < 4U; ++i) out[2U + i] = (uint8_t)(value >> (8U * i));
+}
+
+// --- F020/F021 are read-only snapshots; ACK is sent by the common dispatcher ---
+static bool HandleEngineeringDiagnostics(const ParsedCanCommand_t *request)
+{
+    uint16_t cmd = request->cmd_code;
+    if (cmd != CAN_CMD_SRV_GET_DIAG_CAPS && cmd != CAN_CMD_SRV_GET_DIAG_BLOCK) return false;
+    if (request->data_len != 5U) {
+        CAN_SendNackPublic(cmd, CAN_ERR_INVALID_PARAM);
+        return true;
+    }
+
+    // --- Discovery publishes only the schema implemented by this firmware ---
+    if (cmd == CAN_CMD_SRV_GET_DIAG_CAPS) {
+        if (request->device_id || request->data[0] || request->data[1] ||
+            request->data[2] || request->data[3] || request->data[4]) {
+            CAN_SendNackPublic(cmd, CAN_ERR_INVALID_PARAM);
+            return true;
+        }
+        const uint8_t caps[12] = {
+            (uint8_t)CAN_DIAG_BLOCK_SCANNER_UART_RX,
+            (uint8_t)(CAN_DIAG_BLOCK_SCANNER_UART_RX >> 8),
+            CAN_DIAG_SCANNER_UART_SCHEMA, 0x83U, 0, 0,
+            (uint8_t)CAN_DIAG_BLOCK_SCANNER_UART_TX_START,
+            (uint8_t)(CAN_DIAG_BLOCK_SCANNER_UART_TX_START >> 8),
+            CAN_DIAG_SCANNER_UART_TX_SCHEMA, 0x83U, 0, 0
+        };
+        if (!CAN_SendDiagnosticResponse(cmd, caps, sizeof(caps)))
+            CAN_SendNackPublic(cmd, CAN_ERR_DEVICE_BUSY);
+        return true;
+    }
+
+    // --- Selector belongs to Scanner; logical UART index 0 maps to USART3 ---
+    uint16_t block = request->device_id | ((uint16_t)request->data[0] << 8);
+    if ((block != CAN_DIAG_BLOCK_SCANNER_UART_RX &&
+         block != CAN_DIAG_BLOCK_SCANNER_UART_TX_START) || request->data[2] ||
+        request->data[3] || request->data[4]) {
+        CAN_SendNackPublic(cmd, CAN_ERR_INVALID_PARAM);
+        return true;
+    }
+    if (request->data[1] != 0U) {
+        CAN_SendNackPublic(cmd, CAN_ERR_INVALID_DEVICE_ID);
+        return true;
+    }
+
+    // --- One coherent copy; ISR never sends CAN and cannot change this payload ---
+    // Dispatcher is the only caller; static buffers avoid enlarging its task stack.
+    static ScanUartDiagnostics_t snapshot;
+    static uint8_t payload[40U * 6U];
+    // --- START TX has its own block; later STOP cannot overwrite its evidence ---
+    if (block == CAN_DIAG_BLOCK_SCANNER_UART_TX_START) {
+        ScanUartTxDiagnostics_t tx;
+        ScanUart_GetTxDiagnostics(&tx);
+        const uint32_t values[8] = {tx.sequence, tx.start_tick, tx.complete_tick,
+            tx.state, tx.error_mask, tx.requested_len, tx.captured_len, tx.baud};
+        for (uint8_t i = 0; i < 8U; ++i)
+            PackDiagnostic(&payload[i * 6U], i + 1U, values[i]);
+        for (uint8_t i = 0; i < 4U; ++i) {
+            uint32_t word = 0;
+            for (uint8_t b = 0; b < 4U; ++b)
+                word |= (uint32_t)tx.bytes[i * 4U + b] << (8U * b);
+            PackDiagnostic(&payload[(i + 8U) * 6U], i + 9U, word);
+        }
+        if (!CAN_SendDiagnosticResponse(cmd, payload, 12U * 6U))
+            CAN_SendNackPublic(cmd, CAN_ERR_DEVICE_BUSY);
+        return true;
+    }
+    ScanUart_GetDiagnostics(&snapshot);
+    const uint32_t values[8] = {
+        snapshot.sequence, snapshot.tick_ms, snapshot.baud, snapshot.state,
+        snapshot.error_mask, snapshot.error_count, snapshot.length, snapshot.reserved
+    };
+    for (uint8_t i = 0; i < 8U; ++i)
+        PackDiagnostic(&payload[i * 6U], i + 1U, values[i]);
+    for (uint8_t i = 0; i < 32U; ++i) {
+        uint32_t word = 0;
+        for (uint8_t b = 0; b < 4U; ++b)
+            word |= (uint32_t)snapshot.bytes[i * 4U + b] << (8U * b);
+        PackDiagnostic(&payload[(i + 8U) * 6U], i + 9U, word);
+    }
+    if (!CAN_SendDiagnosticResponse(cmd, payload, sizeof(payload)))
+        CAN_SendNackPublic(cmd, CAN_ERR_DEVICE_BUSY);
+    return true;
 }
 
 
@@ -57,6 +150,8 @@ void app_start_task_dispatcher(void *argument)
         // 2. Немедленный ACK (золотое правило)
         CAN_SendAck(parsed.cmd_code);
 
+        if (HandleEngineeringDiagnostics(&parsed)) continue;
+
         // 3. Маршрутизация
         switch (parsed.cmd_code) {
 
@@ -64,7 +159,15 @@ void app_start_task_dispatcher(void *argument)
         // ДОМЕННЫЕ КОМАНДЫ 0x06xx — форвард в scan_queue
         // ============================================================
         case CAN_CMD_SCAN_REQUEST:
+        case CAN_CMD_SCAN_GET_REVISION:
+        case CAN_CMD_SCAN_BEEP:
         case CAN_CMD_SCAN_GET_DATA: {
+            if ((parsed.cmd_code == CAN_CMD_SCAN_GET_REVISION || parsed.cmd_code == CAN_CMD_SCAN_BEEP) &&
+                (parsed.device_id || parsed.data[0] || parsed.data[1] ||
+                 parsed.data[2] || parsed.data[3] || parsed.data[4])) {
+                CAN_SendNackPublic(parsed.cmd_code, 0x0006);
+                break;
+            }
             ScanResult_t scan_cmd;
             memset(&scan_cmd, 0, sizeof(scan_cmd));
             scan_cmd.cmd_code = parsed.cmd_code;
