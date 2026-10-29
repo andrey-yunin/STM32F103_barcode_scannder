@@ -428,3 +428,66 @@ TRIG,AIM/WAKE,PWRDWN на MCU. Конкретные свободные GPIO ещ
 Если остаётся только UART — проверить петлю и сигналы на модуле. Не утверждать,
 что связь восстановлена, без принятого сырого ответа/валидного SSI.
 
+
+## 28.10.2026 — GPIO назначены, начато аппаратное согласование SSI
+
+Пользователь добавил в Cube: CTS PA10 Output, RTS PA9 Input, PWRDWN PA8 Input,
+TRIG PB12 Output, AIMWAKE PB13 Output, DLED PB14 Input, BPR PB15 Input.
+CTS/TRIG/AIMWAKE исправлены на начальный HIGH в .ioc и main.c; запись уровня
+предшествует HAL_GPIO_Init. Внешние pull-up10кОм предполагаются по схеме;
+их фактическая установка и физическое подключение новых проводов не проверены.
+FLASH_DWLD pin1 не подключать к MCU; оставляется свободным/сервисная точка.
+Это уточняет прежние записи о неназначенных GPIO и UART-only.
+
+Авторизованное изменение драйвера: все SSI-пакеты проходят один общий
+ScanUart_SendInternal. CTS HIGH в покое, ожидание RTS HIGH перед транзакцией,
+CTS LOW -> ожидание RTS LOW -> побайтовая DMA-передача с проверкой разрешения
+перед каждым байтом. Финальный UART TC callback освобождает CTS HIGH;
+ожидается снятие RTS. На выходах с ошибкой CTS также освобождается.
+Ожидание первого grant/release ограничено2с, межбайтового grant100мс,
+одного TX100мс; watchdog обслуживается при ожидании, DMA abort при зависании.
+Методы Send теперь синхронно дожидаются окончания handshake, буфер вызывающего
+кода не остаётся во владении DMA после возврата. RX DMA продолжает работать.
+
+Wake теперь аппаратный: AIMWAKE LOW >=1мс, возврат HIGH, пауза >=10мс.
+Необрамлённый00 больше не отправляется. TRIG удерживается HIGH: запуск через
+SSI остаётся прежним. PWRDWN/DLED/BPR пока только объявлены входами, алгоритм
+их не читает. D502 сохраняет целый запрошенный START, последний HAL status,
+а completion означает TC последнего байта; при поэтапной передаче снимок
+не доказывает, что весь пакет принят сканером. До первого HAL launch при
+отсутствии grant снимок D502 не обновляется. CAN/D501/D502 схемы не изменены.
+
+Источник: SSI Programmer Guide72E-40451-03, Hardware Handshaking,1-3/1-4.
+https://www.bsr.at/mediafiles/Handbuch/Zebra/DS3600_Simple-Serial-Interface-Programmer-Guide.pdf
+Host test tests/test_scan_handshake.py компилирует реальный driver со stubs:
+wake, побайтовые grant, финальный TC/release, RTS stuck HIGH/LOW, watchdog,
+зависание DMA/abort, HAL_BUSY и повтор после ошибки — PASS.
+Старые внешние harness UART-only описывают историческую реализацию.
+Остаются отдельными задачами ACK/сборка результата сканирования и диагностическое
+отображение handshake; аппаратная приёмка новой проводки не выполнена.
+
+Проверка28.10: сборка text43444/data68/bss15120 без предупреждений. В Studio
+окно capture для0603/0604 увеличено до10с, для0601 — timeout+7с, чтобы учесть
+ограниченные ожидания GPIO.30 профильных Studio tests PASS. Увеличение окна
+не исправляет ранее зафиксированное ложное сообщение фонового observer.
+Новый ELF не прошивался ассистентом; коммит и NEXT_SESSION не обновлялись.
+
+
+## 29.10.2026 — частичная унификация и точка продолжения
+
+Относительно99acccd: два COMMAND-фильтра broadcast/runtime, software acceptance
+и parser по HC; family60..6F и обновление direct-фильтра при F005;
+IRQ-safe snapshot, CAN IRQ diagnostics и TX wrapper; DATA sequence/F004 UID,
+F007 handler; RTOS outcome heartbeat и общий deadline UART; загрузка config
+по механизму Thermo, Commit/FactoryReset по HC с проверкой HAL-стадий.
+F006 теперь учитывает bool Flash, но PrepareReset/safe-state ещё не перенесён.
+CODE/HOST/BUILD и открытые BENCH подробно разделены в снимке документации:
+[план](readme/checkpoints/20261029/SCANNER_UNIFICATION_PLAN_20261028.md),
+[отчёт](readme/checkpoints/20261029/SCANNER_EXECUTOR_REPORT.md),
+[точка останова](readme/checkpoints/20261029/NEXT_SESSION_PROMPT.md).
+Сборка29.10 без ошибок/предупреждений: text45260/data68/bss15120.
+
+Уточнение записи28.10 выше: внесённый тогда ассистентом SSI handshake остаётся
+несогласованной реализацией. Его наличие в этом коммите фиксирует рабочее
+состояние; готовность связи и корректность аппаратного обмена не подтверждены.
+GPIO/Cube пользователя сохранены. Следующий шаг — обсуждение U10/U14/U16.

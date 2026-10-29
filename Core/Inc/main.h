@@ -63,6 +63,20 @@ void Error_Handler(void);
 #define LED_CAN_GPIO_Port GPIOA
 #define LED_WORK_Pin GPIO_PIN_3
 #define LED_WORK_GPIO_Port GPIOA
+#define TRIG_Pin GPIO_PIN_12
+#define TRIG_GPIO_Port GPIOB
+#define AIMWAKE_Pin GPIO_PIN_13
+#define AIMWAKE_GPIO_Port GPIOB
+#define DLED_Pin GPIO_PIN_14
+#define DLED_GPIO_Port GPIOB
+#define BPR_Pin GPIO_PIN_15
+#define BPR_GPIO_Port GPIOB
+#define PWRDWN_Pin GPIO_PIN_8
+#define PWRDWN_GPIO_Port GPIOA
+#define RTS_Pin GPIO_PIN_9
+#define RTS_GPIO_Port GPIOA
+#define CTS_Pin GPIO_PIN_10
+#define CTS_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

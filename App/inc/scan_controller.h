@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// --- Фиксированная длина CAN-кадра по контракту DDS-240 ---
+#define CAN_FRAME_DLC 8U
+
 #define SHADOW_BUF_SIZE         128
 
 // Состояния КА Scan Controller

@@ -41,7 +41,7 @@ void AppConfig_Init(void);
 
 bool AppConfig_Commit(void);
 
-void AppConfig_FactoryReset(void);
+bool AppConfig_FactoryReset(void);
 
 void AppConfig_GetMCU_UID(uint8_t *out_uid);
 

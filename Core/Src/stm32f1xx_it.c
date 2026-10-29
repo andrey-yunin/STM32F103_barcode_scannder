@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_queues.h"
 #include "app_config.h"
+#include "can_protocol.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -279,24 +280,26 @@ void USART3_IRQHandler(void)
 
 /* USER CODE BEGIN 1 */
 
-// --- CAN RX: ISR → RTOS queue (FIFO0) ---
-// Вызывается HAL из USB_LP_CAN1_RX0_IRQHandler.
-// Должен быть быстрым: только копия фрейма в очередь и флаг задаче.
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-{
+// --- CAN RX: raw frame to queue, overflow to existing diagnostics ---
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *can_handle) {
 	CanRxFrame_t rx_frame;
 
-    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_frame.header, rx_frame.data) == HAL_OK)
-    {
-        if (osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0, 0) == osOK)
-        {
-            osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_RX);
-        }
-        else
-        {
-        	// TODO: CAN_Diagnostics_RecordRxQueueOverflow() — Stage 3 шаг 3
-        }
-    }
+	if (HAL_CAN_GetRxMessage(can_handle,
+	CAN_RX_FIFO0, &rx_frame.header, rx_frame.data) != HAL_OK) {
+		return;
+	}
+
+	if (osMessageQueuePut(can_rx_queueHandle, &rx_frame, 0U, 0U) == osOK) {
+		(void) osThreadFlagsSet(task_can_handleHandle, FLAG_CAN_RX);
+	} else {
+		CAN_Diagnostics_RecordRxQueueOverflow();
+	}
+}
+
+// --- CAN error: retain HAL error bits and ESR without sending CAN from ISR ---
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *can_handle) {
+	CAN_Diagnostics_RecordCanError(HAL_CAN_GetError(can_handle),
+			can_handle->Instance->ESR);
 }
 
 /* USER CODE END 1 */

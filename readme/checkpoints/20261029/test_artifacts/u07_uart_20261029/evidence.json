@@ -1,0 +1,7 @@
+{
+  "source_sha256": "3d1fa9884e96f1e7eeb73b6dd392c5f33b9c77d35ad24af5131595101a93bde1",
+  "actual_wait_matches_proposal": true,
+  "build": "user reports clean",
+  "bench": "NOT RUN",
+  "host_scope": "extracted actual wait loop; result routing and STOP inspected statically"
+}

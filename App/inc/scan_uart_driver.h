@@ -32,9 +32,11 @@ void ScanUart_GetDiagnostics(ScanUartDiagnostics_t *out);
 
 bool ScanUart_Init(void);
 bool ScanUart_StartRx(void);
-// Task-only UART wake: raw 0x00, TX completion, then >=10 ms settling.
+// Task-only hardware AIM/WAKE low pulse, then >=10 ms settling.
 // False means no following SSI command may be submitted.
 bool ScanUart_Wake(void);
+// Task-only synchronous SSI handshake; DMA sends each byte after RTS grant.
+// CTS is released on every exit; false includes handshake/transport failure.
 bool ScanUart_Send(const uint8_t *data, uint16_t len);
 
 // --- START_DECODE evidence is retained independently of later STOP/ENABLE ---

@@ -1,0 +1,1 @@
+PASS: total deadline, RX, RTOS error without heartbeat, remaining wait 200 ticks, tick wrap

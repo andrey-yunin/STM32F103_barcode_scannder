@@ -10,6 +10,7 @@
 #include "main.h"
 #include "app_queues.h"
 #include "app_config.h"
+#include "task_watchdog.h"
 #include <string.h>
 #include <cmsis_os.h>
 
@@ -65,6 +66,8 @@ static uint8_t rx_event_type = 0xFFU;
 // --- One retained START attempt and ownership of the in-flight TX completion ---
 static ScanUartTxDiagnostics_t start_tx = {.state = 0xFFU};
 static uint32_t active_start_sequence;
+static volatile bool tx_byte_done;
+static bool tx_last_byte;
 
 // --- Read-only snapshot; callbacks cannot change the copy while IRQs are masked ---
 void ScanUart_GetTxDiagnostics(ScanUartTxDiagnostics_t *out)
@@ -86,6 +89,8 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
         start_tx.error_mask |= huart->ErrorCode;
     }
     active_start_sequence = 0U;
+    tx_byte_done = true;
+    if (tx_last_byte) HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_SET);
 }
 
 // --- Read-only task snapshot: DMA never writes rx_diag ---
@@ -144,52 +149,83 @@ bool ScanUart_StartRx(void)
     return status == HAL_OK;
 }
 
-// --- SE965HP UART-only wake (IG Table 1-2 and wake timing Table 6-1) ---
-// This is a raw byte, not an SSI packet. Blocking TX is bounded and returns
-// after TC, so the stack byte is no longer referenced when this function exits.
-// Called only by the scan task; RX DMA remains enabled throughout.
-bool ScanUart_Wake(void)
+// --- Bounded task waits keep the watchdog alive; all times are milliseconds ---
+static bool ScanUart_WaitRts(GPIO_PinState level, uint32_t timeout_ms)
 {
-    uint8_t wake = 0x00U;
-    if (HAL_UART_Transmit(&huart3, &wake, 1U, 20U) != HAL_OK) return false;
-
-    // Spec: up to 8 ms to full operation. Allow 10 ms after completed TX.
-    // Extra tick covers calling osDelay just before a scheduler tick boundary.
-    uint32_t ticks = (osKernelGetTickFreq() + 99U) / 100U + 1U;
-    return osDelay(ticks) == osOK;
+    uint32_t started = HAL_GetTick();
+    while (HAL_GPIO_ReadPin(RTS_GPIO_Port, RTS_Pin) != level) {
+        if ((uint32_t)(HAL_GetTick() - started) >= timeout_ms) return false;
+        AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+        if (osDelay(1U) != osOK) return false;
+    }
+    return true;
 }
 
-// --- Submit TX with IRQ-safe association between HAL acceptance and completion ---
-// HAL_OK means DMA submission; only TxCpltCallback marks completion. RX errors
-// may also reach ErrorCallback, so their mask is not labelled as a TX-only error.
+// --- Hardware wake: no unframed UART byte is sent in the CTS/RTS mode ---
+bool ScanUart_Wake(void)
+{
+    HAL_GPIO_WritePin(AIMWAKE_GPIO_Port, AIMWAKE_Pin, GPIO_PIN_RESET);
+    uint32_t ticks = (osKernelGetTickFreq() + 999U) / 1000U + 1U;
+    bool ok = osDelay(ticks) == osOK;
+    HAL_GPIO_WritePin(AIMWAKE_GPIO_Port, AIMWAKE_Pin, GPIO_PIN_SET);
+    ticks = (osKernelGetTickFreq() + 99U) / 100U + 1U;
+    return osDelay(ticks) == osOK && ok;
+}
+
+// --- One SSI transaction: request, grant per byte, completed TX, release ---
+// One-byte DMA transfers retain the existing HAL completion diagnostics while
+// checking decoder permission before every character. Only the last callback
+// marks the whole START complete and releases CTS immediately after UART TC.
 static bool ScanUart_SendInternal(const uint8_t *data, uint16_t len, bool track_start)
 {
-    if (data == NULL || len == 0U) return false;
-    uint32_t irq_state = __get_PRIMASK();
-    __disable_irq();
-    if (track_start) {
-        uint32_t next = start_tx.sequence + 1U;
-        if (next == 0U) next = 1U;
-        memset(&start_tx, 0, sizeof(start_tx));
-        start_tx.sequence = next;
-        start_tx.start_tick = HAL_GetTick();
-        start_tx.state = 0xFFU;
-        start_tx.requested_len = len;
-        start_tx.captured_len = len < SCAN_UART_TX_CAPTURE_SIZE ? len : SCAN_UART_TX_CAPTURE_SIZE;
-        start_tx.baud = huart3.Init.BaudRate;
-        memcpy(start_tx.bytes, data, start_tx.captured_len);
+    if (data == NULL || len == 0U || len > 134U) return false;
+    // The preceding transaction must have released its grant before a new one.
+    if (!ScanUart_WaitRts(GPIO_PIN_SET, 2000U)) return false;
+    HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_RESET);
+    bool success = false;
+    for (uint16_t i = 0; i < len; ++i) {
+        // Bound character gaps below the default 200 ms intercharacter timeout.
+        if (!ScanUart_WaitRts(GPIO_PIN_RESET, i == 0U ? 2000U : 100U)) break;
+        uint32_t irq_state = __get_PRIMASK();
+        __disable_irq();
+        tx_byte_done = false;
+        tx_last_byte = i + 1U == len;
+        if (track_start && i == 0U) {
+            uint32_t next = start_tx.sequence + 1U;
+            if (next == 0U) next = 1U;
+            memset(&start_tx, 0, sizeof(start_tx));
+            start_tx.sequence = next;
+            start_tx.start_tick = HAL_GetTick();
+            start_tx.requested_len = len;
+            start_tx.captured_len = len < SCAN_UART_TX_CAPTURE_SIZE ? len : SCAN_UART_TX_CAPTURE_SIZE;
+            start_tx.baud = huart3.Init.BaudRate;
+            memcpy(start_tx.bytes, data, start_tx.captured_len);
+        }
+        HAL_StatusTypeDef status = HAL_UART_Transmit_DMA(&huart3, (uint8_t *)&data[i], 1U);
+        active_start_sequence = status == HAL_OK && track_start && tx_last_byte
+                                ? start_tx.sequence : 0U;
+        if (track_start) {
+            start_tx.state = (uint32_t)status | ((uint32_t)huart3.gState << 16);
+            start_tx.error_mask |= huart3.ErrorCode;
+        }
+        __set_PRIMASK(irq_state);
+        if (status != HAL_OK) break;
+        uint32_t started = HAL_GetTick();
+        while (!tx_byte_done && (uint32_t)(HAL_GetTick() - started) < 100U) {
+            AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+            if (osDelay(1U) != osOK) break;
+        }
+        if (!tx_byte_done) {
+            // Stop DMA before returning ownership of the caller's packet buffer.
+            HAL_UART_AbortTransmit(&huart3);
+            active_start_sequence = 0U;
+            break;
+        }
+        success = tx_last_byte;
     }
-
-    // --- Retain an earlier active owner when a later submission returns BUSY ---
-    HAL_StatusTypeDef status = HAL_UART_Transmit_DMA(&huart3, (uint8_t *)data, len);
-    if (status == HAL_OK)
-        active_start_sequence = track_start ? start_tx.sequence : 0U;
-    if (track_start) {
-        start_tx.state = (uint32_t)status | ((uint32_t)huart3.gState << 16);
-        start_tx.error_mask |= huart3.ErrorCode;
-    }
-    __set_PRIMASK(irq_state);
-    return status == HAL_OK;
+    HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_SET);
+    if (!success) return false;
+    return ScanUart_WaitRts(GPIO_PIN_SET, 2000U);
 }
 
 // --- Normal commands never replace the retained START snapshot ---

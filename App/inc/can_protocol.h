@@ -11,6 +11,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// --- Фиксированная длина CAN-кадра DDS-240 ---
+#define CAN_FRAME_DLC 8U
+
+// --- Полезные данные DATA-кадра и признак последнего фрагмента ---
+#define CAN_DATA_PAYLOAD_MAX   6U
+#define CAN_DATA_SEQ_EOT_MASK  0x80U
+
 // --- Приоритеты (биты 28-26 Extended CAN ID) ---
 // HIGH — команды Дирижёра, NORMAL — ответы исполнителя.
 #define CAN_PRIORITY_HIGH    0
@@ -31,6 +38,9 @@
 #define CAN_ADDR_BROADCAST      0x00
 #define CAN_ADDR_CONDUCTOR      0x10
 #define CAN_ADDR_SCANNER_BOARD  0x60
+
+#define CAN_ADDR_SCANNER_BOARD_BASE  0x60
+#define CAN_ADDR_SCANNER_BOARD_LAST  0x6F
 
 #define CAN_DYNAMIC_NODE_ID_MIN     0x02
 #define CAN_DYNAMIC_NODE_ID_MAX     0x7F
@@ -115,27 +125,26 @@
 #define CAN_STATUS_LAST_ESR             0x0011
 #define CAN_STATUS_APP_QUEUE_OVERFLOW   0x0012
 
-
 // --- Структура диагностики CAN ---
 typedef struct {
-    uint32_t rx_total;
-    uint32_t tx_total;
-    uint32_t rx_queue_overflow;
-    uint32_t tx_queue_overflow;
-    uint32_t dispatcher_queue_overflow;
-    uint32_t app_queue_overflow;
-    uint32_t dropped_not_ext;
-    uint32_t dropped_wrong_dst;
-    uint32_t dropped_wrong_type;
-    uint32_t dropped_wrong_dlc;
-    uint32_t tx_mailbox_timeout;
-    uint32_t tx_hal_error;
-    uint32_t can_error_callback_count;
-    uint32_t error_warning_count;
-    uint32_t error_passive_count;
-    uint32_t bus_off_count;
-    uint32_t last_hal_error;
-    uint32_t last_esr;
+	uint32_t rx_total;
+	uint32_t tx_total;
+	uint32_t rx_queue_overflow;
+	uint32_t tx_queue_overflow;
+	uint32_t dispatcher_queue_overflow;
+	uint32_t app_queue_overflow;
+	uint32_t dropped_not_ext;
+	uint32_t dropped_wrong_dst;
+	uint32_t dropped_wrong_type;
+	uint32_t dropped_wrong_dlc;
+	uint32_t tx_mailbox_timeout;
+	uint32_t tx_hal_error;
+	uint32_t can_error_callback_count;
+	uint32_t error_warning_count;
+	uint32_t error_passive_count;
+	uint32_t bus_off_count;
+	uint32_t last_hal_error;
+	uint32_t last_esr;
 } CanDiagnostics_t;
 
 // --- Прототипы функций отправки CAN-ответов ---
@@ -143,18 +152,20 @@ typedef struct {
 void CAN_SendAck(uint16_t cmd_code);
 void CAN_SendNackPublic(uint16_t cmd_code, uint16_t error_code);
 void CAN_SendDone(uint16_t cmd_code, uint8_t device_id);
-void CAN_SendData(uint16_t cmd_code, uint8_t *data, uint8_t len);
-void CAN_SendDataFragmented(uint16_t cmd_code, const uint8_t *data, uint8_t total_len);
+void CAN_SendData(uint16_t cmd_code, uint8_t sequence_info, const uint8_t *data,
+		uint8_t len);
+void CAN_SendDataFragmented(uint16_t cmd_code, const uint8_t *data,
+		uint8_t total_len);
 
 // --- Checked task-context diagnostic response; no DONE after enqueue failure ---
 // True confirms queue acceptance only, not physical CAN delivery.
-bool CAN_SendDiagnosticResponse(uint16_t cmd_code, const uint8_t *data, uint16_t len);
+bool CAN_SendDiagnosticResponse(uint16_t cmd_code, const uint8_t *data,
+		uint16_t len);
 
 // --- Прототипы диагностики CAN ---
 void CAN_Diagnostics_GetSnapshot(CanDiagnostics_t *out);
 void CAN_Diagnostics_RecordRxQueueOverflow(void);
 void CAN_Diagnostics_RecordAppQueueOverflow(void);
 void CAN_Diagnostics_RecordCanError(uint32_t hal_error, uint32_t esr);
-
 
 #endif /* INC_CAN_PROTOCOL_H_ */

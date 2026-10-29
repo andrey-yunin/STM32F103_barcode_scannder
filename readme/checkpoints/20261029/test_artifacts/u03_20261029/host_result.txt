@@ -1,0 +1,1 @@
+PASS: callbacks match HC; raw RX queued, queue overflow counted, HAL RX failure bypasses queue, HAL error/ESR retained

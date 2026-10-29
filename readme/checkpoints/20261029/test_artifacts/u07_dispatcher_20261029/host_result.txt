@@ -1,0 +1,1 @@
+PASS: HC wait/heartbeat equality; OK/timeout/Resource/Parameter; ACK before diagnostics; consumed diagnostic bypasses switch
