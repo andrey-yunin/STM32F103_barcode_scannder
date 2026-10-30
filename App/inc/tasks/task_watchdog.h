@@ -10,8 +10,13 @@
 
 #include <stdint.h>
 
-#define APP_WATCHDOG_SUPERVISOR_PERIOD_MS     500U
-#define APP_WATCHDOG_MAX_MISSED_CHECKS        3U
+// --- Профиль контроля прогресса Scanner ---
+// Каждый клиент должен продвинуться за предыдущее окно.
+// Первое окно без прогресса приводит к терминальному отказу.
+#define APP_WATCHDOG_SUPERVISOR_PERIOD_MS     1000U
+#define APP_WATCHDOG_MAX_MISSED_CHECKS        1U
+
+// --- Ограничение штатного ожидания клиентов ---
 #define APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS     500U
 
 typedef enum {

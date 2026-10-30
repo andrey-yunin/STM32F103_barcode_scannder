@@ -23,12 +23,49 @@
 #include "task_watchdog.h"
 #include "task_can_handler.h"
 #include "scan_uart_driver.h"
+#include "app_safety.h"
+#include "task_scan_controller.h"
 
 // --- Проверка NodeID внутри адресного семейства Scanner ---
 // Как в HC: проверяем диапазон, но не занятость адреса другой платой.
 static bool Dispatcher_IsValidNodeId(uint8_t node_id) {
 	return (node_id >= CAN_ADDR_SCANNER_BOARD_BASE)
 			&& (node_id <= CAN_ADDR_SCANNER_BOARD_LAST);
+}
+
+// --- Чтение сервисного ключа по механизму HC ---
+static uint16_t Dispatcher_ReadLe16(const uint8_t *data) {
+	return (uint16_t) data[0] | ((uint16_t) data[1] << 8U);
+}
+
+/*
+ * Фиксирует latch/safe-state и ждёт подготовки задачи Scanner.
+ * Бюджет — одна секунда RTOS; IRQ во время ожидания разрешены.
+ * Отказ подготовки терминален, обычное управление не возобновляется.
+ */
+static void Dispatcher_PrepareReset(void) {
+	// --- Начало общего срока подготовки ---
+	const uint32_t timeout_ticks = osKernelGetTickFreq();
+	const uint32_t started = osKernelGetTickCount();
+
+	AppSafety_PrepareReset();
+
+	// --- Ограниченное ожидание подтверждения домена ---
+	for (;;) {
+		if ((uint32_t) (osKernelGetTickCount() - started) >= timeout_ticks) {
+			Error_Handler();
+		}
+
+		if (ScanTask_IsResetPrepared())
+			return;
+
+		if (osDelay(1U) != osOK) {
+			Error_Handler();
+		}
+
+		// Подтверждает успешный проход ожидания Dispatcher.
+		AppWatchdog_Heartbeat(APP_WDG_CLIENT_DISPATCHER);
+	}
 }
 
 // --- F004: UID передаётся двумя последовательными DATA-фрагментами ---
@@ -308,15 +345,25 @@ void app_start_task_dispatcher(void *argument) {
 		}
 
 		case CAN_CMD_SRV_REBOOT: {
-			uint16_t key = (uint16_t) (parsed.data[0]
-					| ((uint16_t) parsed.data[1] << 8));
-			if (key == SRV_MAGIC_REBOOT) {
-				CAN_SendDone(parsed.cmd_code, 0);
-				osDelay(100);
-				NVIC_SystemReset();
-			} else {
+			// --- Проверка ключа до любых действий подготовки ---
+			if ((parsed.data_len < 2U)
+					|| (Dispatcher_ReadLe16(parsed.data) != SRV_MAGIC_REBOOT)) {
 				CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_INVALID_KEY);
+				break;
 			}
+
+			// --- Подтверждённая подготовка предшествует DONE ---
+			Dispatcher_PrepareReset();
+
+			CAN_SendDone(parsed.cmd_code, 0U);
+
+			// --- Существующее окно отправки HC: 100 тиков ---
+			// Постановка DONE в очередь не гарантирует доставку по CAN.
+			if (osDelay(100U) != osOK) {
+				Error_Handler();
+			}
+
+			NVIC_SystemReset();
 			break;
 		}
 
@@ -354,27 +401,37 @@ void app_start_task_dispatcher(void *argument) {
 			break;
 
 		case CAN_CMD_SRV_FACTORY_RESET: {
-			uint16_t key = (uint16_t) (parsed.data[0]
-					| ((uint16_t) parsed.data[1] << 8));
-			if (key == SRV_MAGIC_FACTORY_RESET) {
-				// --- FACTORY_RESET: стирание Flash + перезагрузка ---
-				// --- Результат стирания определяет сервисный ответ ---
-				if (AppConfig_FactoryReset()) {
-					CAN_SendDone(parsed.cmd_code, 0U);
-				} else {
-					CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_FLASH_WRITE);
-				}
-				osDelay(100);
-				NVIC_SystemReset();
-			} else {
+			// --- Проверка ключа до подготовки и стирания Flash ---
+			if ((parsed.data_len < 2U)
+					|| (Dispatcher_ReadLe16(parsed.data)
+							!= SRV_MAGIC_FACTORY_RESET)) {
 				CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_INVALID_KEY);
+				break;
 			}
+
+			// --- Подтверждённая подготовка предшествует Flash ---
+			Dispatcher_PrepareReset();
+
+			// --- Результат стирания определяет сервисный ответ ---
+			if (AppConfig_FactoryReset()) {
+				CAN_SendDone(parsed.cmd_code, 0U);
+			} else {
+				CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_FLASH_WRITE);
+			}
+
+			// --- После ошибки управление также не возобновляется ---
+			// Существующее окно HC: 100 тиков, без гарантии доставки CAN.
+			if (osDelay(100U) != osOK) {
+				Error_Handler();
+			}
+
+			NVIC_SystemReset();
 			break;
 		}
 
 		case CAN_CMD_SRV_GET_STATUS:
-            Dispatcher_HandleGetStatus();
-            break;
+			Dispatcher_HandleGetStatus();
+			break;
 
 		default:
 			CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_UNKNOWN_CMD);

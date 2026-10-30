@@ -54,3 +54,12 @@ CAN protocol documentation:
 ```text
 /home/andrey/STM32CubeIDE/workspace_1.19.0/DDS-240_readme/DDS-240_eko_system/CAN_Protocol
 ```
+
+
+## Current Scanner handoff — 2026-10-30
+
+Start with [canonical handoff](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md)
+and [unification plan](../../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).
+The versioned session snapshot is [checkpoints/20261030](checkpoints/20261030/).
+Next: U22, preserve RX events until the scan task consumes them. Packet assembly
+in the task is implemented; full U22 and hardware acceptance remain open.

@@ -22,7 +22,13 @@ because it builds. Preserve user changes and historical documentation.
 
 Current plan:
 [Scanner unification plan](../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).
-Previously supplied F005 needs re-review; its extra inline checks are not an
-accepted reference transfer. Earlier assistant-written SSI handshake remains
-unagreed worktree code. Do not treat its presence as approval or revert it
-without instruction. Do not delegate to subagents unless the user requests it.
+Current stop: end of 2026-10-30; see canonical Scanner/NEXT_SESSION_PROMPT.md
+and repository readme/checkpoints/20261030/. D/E and outgoing SSI ACK have
+scoped CODE/HOST/BUILD evidence. Scan_CollectPacket assembles packets delivered
+to the task; U22 remains open for preserving RX events before task consumption.
+The earlier driver accumulation/out_overflow proposal was deferred and not
+applied. Do not apply it automatically. Byte-DMA TX with existing local bounds
+is now agreed; physical SSI operation and EE=1 are not bench confirmed.
+The specific edit and commit permissions for 2026-10-30 do not authorize new
+firmware edits, flashing, hardware commands, or future commits. Do not delegate
+to subagents unless the user requests it.

@@ -1,0 +1,11 @@
+{
+  "build": "Debug incremental make -j4 all; task_scan_controller.c recompiled and ELF linked",
+  "exit_code": 0,
+  "warnings": 0,
+  "text": 47804,
+  "data": 68,
+  "bss": 15392,
+  "elf_sha256": "d22488efc12d92ea3b4d3aced42f82c3aaf4eedbf463512c18658d0b0515ce72",
+  "release": "NOT RUN",
+  "bench": "NOT RUN"
+}

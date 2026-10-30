@@ -1,0 +1,42 @@
+{
+  "source_sha256": {
+    "App/src/app_safety.c": "f3c324a78fce340326c87946b41ad042be87f9fbd557a3bd587f7091aa9b30c3",
+    "App/src/scan_uart_driver.c": "cba5ea56ae6beb536a3a972b41ffd7c9c1cb192ff42fc4ecd6d8b8c507193903",
+    "App/src/scan_controller.c": "a89355e1342806a14513a712214014788231a714ff9102a87edcb2f3aa8985fc",
+    "App/src/scan_ssi.c": "8fe144a643f8b0ea95afb889e68497e6cca5e8411fe74c7622ec89f927b95353",
+    "App/src/tasks/task_scan_controller.c": "b8a135d2d2548b5addc24c6fc1e77c390c9abe7feb6a292f41bfbd4e5b4c8ec5",
+    "App/src/tasks/task_dispatcher.c": "83b613eb0ef66ab3f9cf8f7ae07afc0587f65bfeabe1f32a96b4f34ff7e749dc",
+    "Core/Src/main.c": "2f7f55b3f43cc80d29cffba5ff2714f76b8bfb112ceffda606597b52175ac433",
+    "Core/Src/stm32f1xx_it.c": "029083b4aef57386bf2200f96a22fecb4f9d63e21a5b5998d5a7afcc7c8eff10",
+    "App/inc/app_safety.h": "0511906649952db6daa761351a78be2cea21588b408d3ac83da5dfea62f444e3",
+    "App/inc/scan_uart_driver.h": "15a697955d926d0c8dcecd0f73fbf84f792aa2a4382d03cef16a093a4b97e36f",
+    "App/inc/tasks/task_scan_controller.h": "f194c8b80ef28c0bed285e30f7f0a0c2de5def79b03dba66924c564eb65e3ff1",
+    "App/inc/app_config.h": "92b571fc2517b0cbc979fd65e6e53e1f4a472f7f6715de9d0c8d87a10875f061",
+    "App/inc/tasks/task_watchdog.h": "07286e1a9bf6eda810b09f261136d235faff653c6758d829ca8ecc98c5f7e2d0",
+    "App/inc/scan_controller.h": "5e7309fc1064b70741c4e18665701744c9f27403963a04078eb1afe9bfb3001d",
+    "App/inc/scan_ssi.h": "94faa2daa943e7a88f5be23ee2341e633c6409db9709b754c3c94b13cb214c1a",
+    "Core/Inc/main.h": "c155d144e3aa45874e0f7573681dcb283d92a6788b17054be96a61c9909482c4"
+  },
+  "global_config_sha256": "c1b944eb2e845d4e715e9cdc546024d07b2ad99cd67f43fbcd7548048cb456bc",
+  "scanner_head": "5569467493bd04189221299693a41bad112a0c57",
+  "compiler": "gcc (Ubuntu 13.2.0-23ubuntu4) 13.2.0",
+  "compile_command": [
+    "gcc",
+    "-std=c11",
+    "-O0",
+    "-g",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-comment",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/DDS-240_readme/DDS-240_eko_system/Scanner/test_artifacts/ssi_packet_assembly_20261030",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/App/inc",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/App/inc/tasks",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/DDS-240_readme/DDS-240_eko_system",
+    "/home/andrey/STM32CubeIDE/workspace_1.19.0/DDS-240_readme/DDS-240_eko_system/Scanner/test_artifacts/ssi_packet_assembly_20261030/host.c",
+    "-o",
+    "/tmp/scanner-reset-host-p0w7zbju/host"
+  ],
+  "host_exit_code": 0,
+  "limits": "Mock HAL/RTOS, explicit sequential interleavings. No real DMA, CAN bus, SSI module, scheduler, fault exception or watchdog reset. Fatal loops only replaced by longjmp."
+}

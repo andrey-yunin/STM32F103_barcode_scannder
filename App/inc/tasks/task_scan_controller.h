@@ -8,6 +8,12 @@
 #ifndef INC_TASKS_TASK_SCAN_CONTROLLER_H_
 #define INC_TASKS_TASK_SCAN_CONTROLLER_H_
 
+#include <stdbool.h>
+
+// --- Подтверждение доменной подготовки к reset ---
+// Устанавливается задачей Scanner после отмены операции и остановки RX.
+bool ScanTask_IsResetPrepared(void);
+
 void app_start_task_scan_controller(void *argument);
 
 #endif /* INC_TASKS_TASK_SCAN_CONTROLLER_H_ */

@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    stm32f1xx_it.c
-  * @brief   Interrupt Service Routines.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    stm32f1xx_it.c
+ * @brief   Interrupt Service Routines.
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -25,6 +25,7 @@
 #include "app_queues.h"
 #include "app_config.h"
 #include "can_protocol.h"
+#include "app_safety.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,7 +55,19 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+// --- Общий аппаратный safe-state для аварийных исключений ---
+/*
+ * Не зависит от RTOS, CAN, UART и динамической памяти.
+ * Сначала запрещает переключение задач, затем отпускает управляющие линии.
+ * IRQ не восстанавливаются; обработчик остаётся в терминальном цикле.
+ * IWDG здесь не обслуживается.
+ */
+static void EnterSafeFaultState(void) {
+	__disable_irq();
+	AppSafety_AllOff();
+	__DSB();
+	__ISB();
+}
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
@@ -77,12 +90,11 @@ extern TIM_HandleTypeDef htim4;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-
+	EnterSafeFaultState();
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
-   while (1)
-  {
-  }
+	while (1) {
+	}
   /* USER CODE END NonMaskableInt_IRQn 1 */
 }
 
@@ -92,7 +104,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+	EnterSafeFaultState();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -107,7 +119,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+	EnterSafeFaultState();
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -122,7 +134,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+	EnterSafeFaultState();
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -137,7 +149,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-
+	EnterSafeFaultState();
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {

@@ -1,0 +1,48 @@
+{
+  "source_sha256": {
+    "App/src/app_safety.c": "f3c324a78fce340326c87946b41ad042be87f9fbd557a3bd587f7091aa9b30c3",
+    "App/src/scan_uart_driver.c": "51ac73da0628b687f22d513081879f0d2b32a8df9917c0bea6a8cae598deb29b",
+    "App/src/scan_controller.c": "0f2ed954d5ba8a7a5ee8a8cac27bbc80e8ec18a7939a830b605c1dfbbee8294b",
+    "App/src/scan_ssi.c": "8fe144a643f8b0ea95afb889e68497e6cca5e8411fe74c7622ec89f927b95353",
+    "App/src/tasks/task_scan_controller.c": "ee873028584179a6e9d0ea71a376eded7d3f04443eff9f6d717e0f866df808c7",
+    "App/src/tasks/task_dispatcher.c": "83b613eb0ef66ab3f9cf8f7ae07afc0587f65bfeabe1f32a96b4f34ff7e749dc",
+    "Core/Src/main.c": "c815fd5a30a6b46c97ce15d961bbb2dde0989c70fba92316b69504f24b7a6c61",
+    "Core/Src/stm32f1xx_it.c": "b93cc9f424bd6b53990b3c58a31770c0a20d21de95c33debd5a81e1df7f9071e",
+    "App/inc/app_safety.h": "0511906649952db6daa761351a78be2cea21588b408d3ac83da5dfea62f444e3",
+    "App/inc/scan_uart_driver.h": "15a697955d926d0c8dcecd0f73fbf84f792aa2a4382d03cef16a093a4b97e36f",
+    "App/inc/tasks/task_scan_controller.h": "f194c8b80ef28c0bed285e30f7f0a0c2de5def79b03dba66924c564eb65e3ff1",
+    "App/inc/app_config.h": "92b571fc2517b0cbc979fd65e6e53e1f4a472f7f6715de9d0c8d87a10875f061",
+    "App/inc/tasks/task_watchdog.h": "fae5cb96ba8dc6a2a42b05bb5f6b9fe67abdc743055ebed524b8128e8fcb8a12",
+    "App/inc/scan_controller.h": "a159b383cf44a61961ae9e02513e12c28b09e5256697f3faf0ccdff133f7d365",
+    "App/inc/scan_ssi.h": "94faa2daa943e7a88f5be23ee2341e633c6409db9709b754c3c94b13cb214c1a",
+    "Core/Inc/main.h": "c155d144e3aa45874e0f7573681dcb283d92a6788b17054be96a61c9909482c4"
+  },
+  "global_config_sha256": "c1b944eb2e845d4e715e9cdc546024d07b2ad99cd67f43fbcd7548048cb456bc",
+  "scanner_head": "5569467493bd04189221299693a41bad112a0c57",
+  "compiler": "gcc (Ubuntu 13.2.0-23ubuntu4) 13.2.0",
+  "compile_command": [
+    "gcc",
+    "-std=c11",
+    "-O0",
+    "-g",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-comment",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/App/inc",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/App/inc/tasks",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/DDS-240_readme/DDS-240_eko_system",
+    "/home/andrey/STM32CubeIDE/workspace_1.19.0/DDS-240_readme/DDS-240_eko_system/Scanner/test_artifacts/u10_u14_u16_20261030/host.c",
+    "-o",
+    "/tmp/scanner-reset-host-zaqbxsa3/host"
+  ],
+  "host_exit_code": 0,
+  "limits": "Mock HAL/RTOS, explicit sequential interleavings. No real DMA, CAN bus, SSI module, scheduler, fault exception or watchdog reset. Fatal loops only replaced by longjmp. Redundant ScanTask_IsResetPrepared declaration in scan_controller.h is a pending API ownership cleanup; no behavioral change required.",
+  "build": {
+    "command": "make -C STM32F103_scanner/Debug -B -j4 all (CubeIDE bundled GNU Tools for STM32 13.3.rel1 in PATH)",
+    "exit_code": 0,
+    "warnings": 0,
+    "errors": 0,
+    "elf_sha256": "677360ab5643c1cc25dd9ee01fb7c450c75d1318917a8c74c02925a313d02f9c"
+  }
+}
