@@ -1,0 +1,30 @@
+{
+  "candidate": true,
+  "source_sha256": {
+    "App/src/app_safety.c": "cca7035355329693eb9afdffa03419a497b85b1b4af366447b8ee91ea7795205",
+    "App/src/scan_uart_driver.c": "692d1d3baa4e554e7aded6aa8a5eb5a47701191d27e5e1b84569003b3d4c99f7",
+    "App/src/scan_controller.c": "a89355e1342806a14513a712214014788231a714ff9102a87edcb2f3aa8985fc",
+    "App/src/scan_ssi.c": "8fe144a643f8b0ea95afb889e68497e6cca5e8411fe74c7622ec89f927b95353",
+    "App/src/tasks/task_scan_controller.c": "621b3dfbe4a590cfd928318d84f260df25846265cc0baf8cff298418363824e3"
+  },
+  "command": [
+    "gcc",
+    "-std=c11",
+    "-O0",
+    "-g",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-unused-function",
+    "-Wno-unused-variable",
+    "-Wno-comment",
+    "-I/tmp/scanner_rx_finish_actual_20261102/App/inc",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/App/inc",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/App/inc/tasks",
+    "-I/home/andrey/STM32CubeIDE/workspace_1.19.0/DDS-240_readme/DDS-240_eko_system",
+    "/tmp/scanner_rx_finish_actual_20261102/host.c",
+    "-o",
+    "/tmp/scanner_rx_finish_actual_20261102/host"
+  ],
+  "limits": "Sequential mock HAL/RTOS. Not target HAL execution, IRQ latency, real DMA TX, scheduler or hardware UART."
+}

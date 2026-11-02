@@ -22,7 +22,25 @@ because it builds. Preserve user changes and historical documentation.
 
 Current plan:
 [Scanner unification plan](../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).
-Current stop: end of 2026-10-30; see canonical Scanner/NEXT_SESSION_PROMPT.md
+Current stop: end of 2026-11-02; see canonical Scanner/NEXT_SESSION_PROMPT.md
+and readme/checkpoints/20261102/. RX/TX USART3 now use UART interrupts; RX
+pending storage is 128 bytes. Both DMA channels were removed by the user in
+Cube. RX close/error handling and no STOP after success have scoped HOST13
+and Debug evidence (45740/68/15128); physical SSI and EE=1 are still unverified.
+Next agreed block, NOT implemented: controlled F002/F006 preparation with
+immediate latch/safe GPIO, a task-owned STOP-only shutdown path, correct
+handling of old replies, prepared only after confirmed stop/RX closure, and
+one shared 3-second preparation budget replacing the current 1 second.
+Normal UART commands stay forbidden after latch. Do not simply bypass gates
+or extend every wait; post-latch RX/TX behavior needs a complete checked block.
+F003 Flash/UART arbitration follows separately. Never wait for SSI in fatal
+paths. Preserve the code-versus-BENCH distinction and user's working changes.
+Specific edit permissions from this session do not authorize future firmware
+edits, configuration changes, commits, flashing or hardware commands.
+Give exact manual code blocks; do not offer git apply as the editing workflow.
+Do not delegate without the user's request.
+
+Historical stop (superseded by 2026-11-02): end of 2026-10-30; see canonical Scanner/NEXT_SESSION_PROMPT.md
 and repository readme/checkpoints/20261030/. D/E and outgoing SSI ACK have
 scoped CODE/HOST/BUILD evidence. Scan_CollectPacket assembles packets delivered
 to the task; U22 remains open for preserving RX events before task consumption.

@@ -16,7 +16,7 @@ static volatile bool app_safety_reset_pending = false;
  * Допускает вызов до MX_GPIO_Init(), из startup и аварийных обработчиков.
  * Не использует RTOS, UART, CAN или Flash.
  *
- * Не отменяет UART/DMA и не устанавливает запрет повторной активации.
+ * Не отменяет UART и не устанавливает запрет повторной активации.
  * HIGH на TRIG не гарантирует остановку сканирования, запущенного SSI.
  */
 void AppSafety_AllOff(void) {
@@ -56,7 +56,7 @@ bool AppSafety_IsResetPending(void) {
 
 // --- Атомарная фиксация запрета и аппаратный safe-state ---
 // Без Flash, CAN и ожиданий RTOS. Состояние IRQ вызывающего сохраняется.
-// Отмена UART/DMA подключается отдельным блоком.
+// Отмену UART после latch выполняет задача Scanner через Scan_SyncResetState.
 void AppSafety_PrepareReset(void) {
 	const uint32_t saved_primask = __get_PRIMASK();
 	__disable_irq();

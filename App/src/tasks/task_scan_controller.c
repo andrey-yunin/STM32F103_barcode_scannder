@@ -111,8 +111,8 @@ static bool Scan_CollectPacket(const uint8_t *data, uint16_t len,
 		// --- Полный ACK не завершает ожидание штрихкода ---
 		SsiMsg_t message;
 
-		if (Ssi_Decode(packet, *packet_len, &message)
-				&& message.opcode == SSI_OP_CMD_ACK) {
+		if (Ssi_Decode(packet, *packet_len,
+				&message) && message.opcode == SSI_OP_CMD_ACK) {
 			*packet_len = 0U;
 			continue;
 		}
@@ -153,7 +153,7 @@ static void ScanQueryRevision(uint16_t command) {
 		return;
 	}
 
-	// Keep the DMA TX buffer alive and capture even malformed/fragmented RX.
+	// Capture retains raw RX, including malformed and fragmented responses.
 	// Fixed 3 s covers the default 2 s SSI response timeout with margin.
 	uint32_t started = osKernelGetTickCount();
 	uint32_t duration = 3U * osKernelGetTickFreq();
@@ -283,16 +283,31 @@ void app_start_task_scan_controller(void *argument) {
 			continue;
 		}
 
-		// --- SCAN_REQUEST ---
+		// --- Запуск состояния текущего запроса ---
 		if (!ScanCtrl_StartScan(cmd.timeout_sec)) {
 			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_DEVICE_BUSY);
 			continue;
 		}
 
-		// Отправка START_DECODE
+		// --- Открытие накопления ответа перед отправкой START ---
+		// Открываем накопление только после принятия запроса контроллером.
+		if (!ScanUart_BeginRead()) {
+			if (Scan_SyncResetState()) {
+				CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_DEVICE_BUSY);
+			} else {
+				ScanCtrl_HandleTransportError();
+				CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_COMM);
+			}
+			continue;
+		}
+
+		// --- Отправка START_DECODE ---
 		ssi_len = Ssi_Encode(SSI_OP_START_DECODE, NULL, 0, ssi_packet);
 		// Retain this attempt separately from the subsequent STOP_DECODE.
 		if (!ScanUart_Wake() || !ScanUart_SendStart(ssi_packet, ssi_len)) {
+			// --- Закрытие накопления при несостоявшемся запуске ---
+			(void) ScanUart_EndRead();
+
 			// --- Reset отличается от ошибки передачи START ---
 			if (Scan_SyncResetState()) {
 				CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_DEVICE_BUSY);
@@ -323,16 +338,44 @@ void app_start_task_scan_controller(void *argument) {
 		uint16_t rx_len = 0U;
 		const uint8_t *rx_data = NULL;
 
-		// --- Ограниченные ожидания внутри общего срока ---
+		// --- Приём пакета в пределах исходного срока запроса ---
+		// Сначала забираем накопленные байты, затем при необходимости ждём.
+		// Число уведомлений не определяет количество доступных данных.
 		for (;;) {
-			// --- Отмена ожидания текущего сканирования ---
+			// --- Отмена и общий срок ---
 			if (AppSafety_IsResetPending())
 				break;
+
 			uint32_t elapsed = osKernelGetTickCount() - started;
-			if (elapsed >= timeout_ticks) {
+
+			if (elapsed >= timeout_ticks)
+				break;
+
+			// --- Потребление накопленных байтов ---
+			uint16_t received_len;
+			bool receive_error;
+
+			const uint8_t *received = ScanUart_GetReceived(&received_len,
+					&receive_error);
+
+			if (receive_error) {
+				wait_error = true;
 				break;
 			}
 
+			if (received != NULL) {
+				AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+
+				if (!Scan_CollectPacket(received, received_len, rx_packet,
+						&rx_len))
+					continue;
+
+				rx_data = rx_packet;
+				rx_received = true;
+				break;
+			}
+
+			// --- Ожидание следующих данных без перезапуска срока ---
 			uint32_t remaining = timeout_ticks - elapsed;
 			uint32_t wait_ticks =
 					remaining < slice_ticks ? remaining : slice_ticks;
@@ -340,35 +383,17 @@ void app_start_task_scan_controller(void *argument) {
 			uint32_t flags = osThreadFlagsWait(
 			FLAG_SCAN_UART_RX, osFlagsWaitAny, wait_ticks);
 
-			// Штатное ожидание завершилось без данных.
 			if (flags == osFlagsErrorTimeout) {
 				AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
 				continue;
 			}
 
-			// Ошибка RTOS: прекращаем запрос без ложного heartbeat.
 			if ((flags & osFlagsError) != 0U) {
 				wait_error = true;
 				break;
 			}
 
 			AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
-
-			// --- Продолжение сборки текущего SSI-пакета ---
-			uint16_t received_len;
-			const uint8_t *received = ScanUart_GetReceived(&received_len);
-
-			if (received == NULL)
-				continue;
-
-			// Пока пакет неполный, сохраняем его и ждём следующие байты.
-			if (!Scan_CollectPacket(received, received_len, rx_packet, &rx_len))
-				continue;
-
-			// Полный пакет передаётся существующей обработке ACK и результата.
-			rx_data = rx_packet;
-			rx_received = true;
-			break;
 		}
 
 		// --- Подтверждение штрихкода сканеру до принятия результата и отправки CAN ---
@@ -379,6 +404,12 @@ void app_start_task_scan_controller(void *argument) {
 			ssi_len = Ssi_Encode(SSI_OP_CMD_ACK, NULL, 0, ssi_packet);
 			ack_error = !ScanUart_Wake() || !ScanUart_Send(ssi_packet, ssi_len);
 		}
+
+		// --- Закрытие накопления и итоговая проверка RX ---
+		// EndRead атомарно сохраняет итог ошибки и закрывает накопление.
+		// Данные результата уже находятся в rx_packet задачи.
+		if (!ScanUart_EndRead())
+			wait_error = true;
 
 		// --- Reset имеет приоритет над RX, timeout и ошибкой ожидания ---
 		if (Scan_SyncResetState()) {
@@ -415,9 +446,14 @@ void app_start_task_scan_controller(void *argument) {
 			}
 		}
 
-		// STOP_DECODE
-		ssi_len = Ssi_Encode(SSI_OP_STOP_DECODE, NULL, 0, ssi_packet);
-		if (ScanUart_Wake())
-			ScanUart_Send(ssi_packet, ssi_len);
+		// --- Прекращение попытки после неуспешного чтения ---
+		// После успешного чтения дополнительный STOP не отправляем.
+		// Проверка исхода STOP будет частью отдельного блока отмены.
+		if (ScanCtrl_GetState() != SCAN_STATE_DATA_READY) {
+			ssi_len = Ssi_Encode(SSI_OP_STOP_DECODE, NULL, 0, ssi_packet);
+
+			if (ScanUart_Wake())
+				(void) ScanUart_Send(ssi_packet, ssi_len);
+		}
 	}
 }

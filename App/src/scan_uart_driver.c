@@ -16,13 +16,18 @@
 
 extern UART_HandleTypeDef huart3;
 
-// --- DMA_NORMAL receive buffer + domain holding buffer ---
-static uint8_t dma_buffer[SCAN_UART_BUF_SIZE];
-static uint8_t holding_buf[SCAN_UART_BUF_SIZE];
-static volatile uint16_t holding_len = 0;
+// --- Побайтовый приём UART и накопитель непрочитанных данных ---
+// ISR добавляет байты текущего обмена.
+// Задача забирает накопленное и освобождает место под защитой PRIMASK.
+static uint8_t rx_byte;
+static uint8_t holding_buf[SCAN_UART_PENDING_SIZE];
+static volatile uint16_t holding_len;
+static volatile bool read_active;
+static volatile bool read_error;
+
+// --- Независимый сырой захват для диагностических команд ---
 static ScanUartCapture_t capture;
 static volatile bool capture_active;
-static uint16_t rx_prefix;
 
 // --- Capture ownership changes only in scan-task context with IRQs masked ---
 void ScanUart_BeginCapture(void) {
@@ -40,23 +45,6 @@ void ScanUart_EndCapture(ScanUartCapture_t *out) {
 	if (out != NULL)
 		*out = capture;
 	__set_PRIMASK(irq_state);
-}
-
-// --- HT and subsequent IDLE/TC share a prefix; retain each byte only once ---
-static void ScanUart_CaptureRx(uint16_t size, bool half_transfer) {
-	uint16_t offset = size >= rx_prefix ? rx_prefix : 0U;
-	if (capture_active) {
-		uint16_t count = size - offset;
-		uint16_t room = SCAN_UART_CAPTURE_SIZE - capture.length;
-		if (count > room) {
-			count = room;
-			capture.overflow = true;
-		}
-		memcpy(capture.bytes + capture.length, dma_buffer + offset, count);
-		capture.length += count;
-		capture.errors |= huart3.ErrorCode;
-	}
-	rx_prefix = half_transfer ? size : 0U;
 }
 
 // --- Diagnostic storage is separate from the SSI/domain holding buffer ---
@@ -96,7 +84,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
 		HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_SET);
 }
 
-// --- Read-only task snapshot: DMA never writes rx_diag ---
+// --- Read-only task snapshot; UART callbacks are excluded during copying ---
 void ScanUart_GetDiagnostics(ScanUartDiagnostics_t *out) {
 	if (out == NULL)
 		return;
@@ -109,42 +97,68 @@ void ScanUart_GetDiagnostics(ScanUartDiagnostics_t *out) {
 	__set_PRIMASK(irq_state);
 }
 
-// --- Capture the stable prefix reported by HAL, including half-transfer ---
-// DMA_NORMAL: HT prefix remains stable while DMA writes its second half.
-// Do not interpret this prefix as a validated SSI packet.
-static void ScanUart_RecordRx(uint16_t size) {
-	++rx_diag.sequence;
-	if (rx_diag.sequence == 0U)
+// --- Диагностика последнего завершённого побайтового приёма ---
+// D501 сохраняет формат. Последний принятый байт находится в bytes[0].
+// Остальные байты статического снимка остаются нулевыми.
+static void ScanUart_RecordRx(uint8_t byte) {
+	if (++rx_diag.sequence == 0U)
 		++rx_diag.sequence;
+
 	rx_diag.tick_ms = HAL_GetTick();
-	rx_diag.length = size;
-	rx_event_type = (uint8_t) HAL_UARTEx_GetRxEventType(&huart3);
-	memset(rx_diag.bytes, 0, sizeof(rx_diag.bytes));
-	memcpy(rx_diag.bytes, dma_buffer, size);
+	rx_diag.length = 1U;
+	rx_event_type = 0U; // TC: завершён HAL_UART_Receive_IT(..., 1).
+	rx_diag.bytes[0] = byte;
 	rx_diag.error_mask |= huart3.ErrorCode;
 }
 
-// --- Preserve UART errors; this observer does not change recovery policy ---
+// --- Неблокирующее уведомление задачи о доступных данных ---
+// Отказ уведомления сохраняется как ошибка текущего приёма.
+// Задача проверяет состояние накопителя независимо от числа уведомлений.
+static void ScanUart_NotifyRead(void) {
+	if (read_active
+			&& (osThreadFlagsSet(task_scan_contrHandle, FLAG_SCAN_UART_RX)
+					& osFlagsError) != 0U)
+		read_error = true;
+}
+
+// --- Сохранение ошибки до повторного запуска UART RX ---
+// HAL может остановить приём при ошибке.
+// Продолжающийся приём не перезапускаем.
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	if (huart->Instance != USART3)
 		return;
+
 	rx_diag.error_mask |= huart->ErrorCode;
+
 	if (capture_active)
 		capture.errors |= huart->ErrorCode;
+
 	if (active_start_sequence != 0U
 			&& active_start_sequence == start_tx.sequence)
 		start_tx.error_mask |= huart->ErrorCode;
+
 	if (rx_diag.error_count != UINT32_MAX)
 		++rx_diag.error_count;
+
+	if (AppSafety_IsResetPending())
+		return;
+
+	if (read_active)
+		read_error = true;
+
+	if (huart->RxState == HAL_UART_STATE_READY)
+		(void) ScanUart_StartRx();
+
+	ScanUart_NotifyRead();
 }
 
 /*
- * Отменяет приём после установки reset-latch.
- * Latch и RX-gate исключают повторный запуск из callback.
- * Вызывается задачей-владельцем; CAN-ответов не формирует.
+ * Отменяет RX после установки reset-latch.
+ * Вызывает задача Scanner; диагностика сохраняется.
+ * Latch запрещает повторный запуск из позднего callback.
  */
 bool ScanUart_CancelRx(void) {
-	// --- Закрытие накопления результата ---
+	// --- Закрытие сырого захвата ---
 	const uint32_t saved_primask = __get_PRIMASK();
 	__disable_irq();
 
@@ -153,33 +167,37 @@ bool ScanUart_CancelRx(void) {
 
 	__set_PRIMASK(saved_primask);
 
-	// --- Остановка UART RX DMA ---
+	// --- Остановка побайтового UART RX ---
 	HAL_StatusTypeDef status = HAL_UART_AbortReceive(&huart3);
 
-	// --- Аннулирование данных отменённой операции ---
-	// После latch RX callback эти поля больше не обновляет.
+	// --- Аннулирование данных отменённого обмена ---
+	// После latch callback эти поля больше не обновляет.
+	read_active = false;
 	holding_len = 0U;
-	rx_prefix = 0U;
+	read_error = false;
 
-	// --- Результат аппаратной остановки ---
 	if (status != HAL_OK)
 		return false;
 
 	return true;
 }
 
+// --- Инициализация приёма; накопление ответа пока закрыто ---
 bool ScanUart_Init(void) {
-	holding_len = 0;
+	read_active = false;
+	read_error = false;
+	holding_len = 0U;
+
 	return ScanUart_StartRx();
 }
 
 /*
- * Запускает RX DMA только до подготовки к reset.
- * Проверка latch и запуск неделимы, включая вызов из RX callback.
- * При запрете диагностика последнего HAL-вызова сохраняется.
+ * Запускает приём одного байта через UART-прерывание.
+ * Вызывается при инициализации и из RX callbacks.
+ * Проверка reset-latch и запуск неделимы.
  */
 bool ScanUart_StartRx(void) {
-	// --- Атомарная проверка запрета RX ---
+	// --- Защищённая проверка запрета приёма ---
 	uint32_t irq_state = __get_PRIMASK();
 	__disable_irq();
 
@@ -188,19 +206,14 @@ bool ScanUart_StartRx(void) {
 		return false;
 	}
 
-	// --- Существующий запуск и запись фактического HAL-результата ---
-	HAL_StatusTypeDef status = HAL_UARTEx_ReceiveToIdle_DMA(&huart3, dma_buffer,
-	SCAN_UART_BUF_SIZE);
-
-	// --- Домен получает завершённый участок RX: IDLE или полный буфер ---
-	// HT не завершает DMA_NORMAL и не должен запускать повторный приём.
-	if (status == HAL_OK) {
-		__HAL_DMA_DISABLE_IT(huart3.hdmarx, DMA_IT_HT);
-	}
+	// --- Запуск следующего побайтового приёма ---
+	HAL_StatusTypeDef status = HAL_UART_Receive_IT(&huart3, &rx_byte, 1U);
 
 	rx_arm_status = (uint8_t) status;
 
-	// --- Завершение критической секции ---
+	if (status != HAL_OK && read_active)
+		read_error = true;
+
 	__DSB();
 	__set_PRIMASK(irq_state);
 
@@ -271,7 +284,7 @@ bool ScanUart_Wake(void) {
 
 /*
  * Вызывается только задачей-владельцем TX.
- * Закрывает принадлежность START completion до остановки DMA.
+ * Закрывает принадлежность START completion до остановки UART TX.
  * При ошибке остановки не возвращает управление владельцу буфера:
  * фактический Error_Handler терминален.
  */
@@ -285,7 +298,7 @@ static void ScanUart_AbortTx(void) {
 
 	__set_PRIMASK(saved_primask);
 
-	// --- Проверяемая остановка UART TX DMA ---
+	// --- Проверяемая остановка UART TX ---
 	if (HAL_UART_AbortTransmit(&huart3) != HAL_OK) {
 		Error_Handler();
 	}
@@ -298,10 +311,10 @@ static void ScanUart_AbortTx(void) {
 	HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_SET);
 }
 
-// --- One SSI transaction: request, grant per byte, completed TX, release ---
-// One-byte DMA transfers retain the existing HAL completion diagnostics while
-// checking decoder permission before every character. Only the last callback
-// marks the whole START complete and releases CTS immediately after UART TC.
+// --- Побайтовая передача SSI через UART-прерывания ---
+// Перед каждым байтом проверяется разрешение RTS.
+// Последний TxCpltCallback фиксирует завершение START
+// и отпускает CTS после фактического окончания передачи UART.
 static bool ScanUart_SendInternal(const uint8_t *data, uint16_t len,
 bool track_start) {
 	if (data == NULL || len == 0U || len > 134U)
@@ -331,7 +344,7 @@ bool track_start) {
 		// Bound character gaps below the default 200 ms intercharacter timeout.
 		if (!ScanUart_WaitRts(GPIO_PIN_RESET, i == 0U ? 2000U : 100U))
 			break;
-		// --- Атомарный запрет запуска следующего DMA-байта ---
+		// --- Атомарный запрет запуска следующего UART-байта ---
 		uint32_t irq_state = __get_PRIMASK();
 		__disable_irq();
 
@@ -356,8 +369,8 @@ bool track_start) {
 			start_tx.baud = huart3.Init.BaudRate;
 			memcpy(start_tx.bytes, data, start_tx.captured_len);
 		}
-		HAL_StatusTypeDef status = HAL_UART_Transmit_DMA(&huart3,
-				(uint8_t*) &data[i], 1U);
+		HAL_StatusTypeDef status = HAL_UART_Transmit_IT(&huart3,
+				&data[i], 1U);
 		active_start_sequence =
 				status == HAL_OK && track_start && tx_last_byte ?
 						start_tx.sequence : 0U;
@@ -366,7 +379,7 @@ bool track_start) {
 					| ((uint32_t) huart3.gState << 16);
 			start_tx.error_mask |= huart3.ErrorCode;
 		}
-		// --- Завершение критической секции запуска DMA ---
+		// --- Завершение критической секции запуска UART TX ---
 		__DSB();
 		__set_PRIMASK(irq_state);
 
@@ -411,60 +424,124 @@ bool ScanUart_SendStart(const uint8_t *data, uint16_t len) {
 }
 
 /*
- * Возвращает согласованную копию последнего RX-события.
- * Вызывается только задачей Scanner.
- * Копия действительна до следующего вызова этой функции;
- * UART callback её не изменяет.
+ * Открывает накопление ответа перед wake/START.
+ * Вызывает только задача Scanner.
+ * Прежние байты и уведомление удаляются до открытия накопления.
+ * UART продолжает принимать независимо от состояния накопителя.
  */
-const uint8_t* ScanUart_GetReceived(uint16_t *out_len) {
-	// --- Буфер снимка принадлежит задаче Scanner ---
-	static uint8_t snapshot[SCAN_UART_BUF_SIZE];
-
-	if (out_len == NULL)
-		return NULL;
-
-	// --- Копирование без вмешательства UART callback ---
-	const uint32_t saved_primask = __get_PRIMASK();
+bool ScanUart_BeginRead(void) {
+	// --- Начало нового обмена без вмешательства RX callback ---
+	uint32_t saved_primask = __get_PRIMASK();
 	__disable_irq();
 
-	uint16_t len = holding_len;
-	if (len > 0U) {
-		memcpy(snapshot, holding_buf, len);
-	}
+	read_active = false;
+	holding_len = 0U;
+	read_error = false;
+
+	uint32_t flags = osThreadFlagsClear(FLAG_SCAN_UART_RX);
+
+	bool ready = (flags & osFlagsError) == 0U && !AppSafety_IsResetPending()
+			&& huart3.RxState == HAL_UART_STATE_BUSY_RX
+			&& rx_arm_status == HAL_OK;
+
+	read_active = ready;
 
 	__set_PRIMASK(saved_primask);
 
-	// --- Передача устойчивого снимка вызывающему ---
+	return ready;
+}
+
+/*
+ * Закрывает накопление по решению задачи Scanner.
+ * Возвращает итог приёма до очистки состояния.
+ * Сам UART, диагностика и независимый capture продолжают работать.
+ */
+bool ScanUart_EndRead(void) {
+	// --- Закрытие накопления и чтение ошибки неделимы ---
+	uint32_t saved_primask = __get_PRIMASK();
+	__disable_irq();
+
+	bool ok = !read_error;
+
+	read_active = false;
+	holding_len = 0U;
+	read_error = false;
+
+	__set_PRIMASK(saved_primask);
+
+	return ok;
+}
+
+/*
+ * Передаёт задаче все непрочитанные байты и освобождает накопитель.
+ * snapshot принадлежит задаче и действителен до следующего вызова.
+ * Ошибка сохраняется до закрытия обмена, в том числе при пустом накопителе.
+ */
+const uint8_t* ScanUart_GetReceived(uint16_t *out_len, bool *out_error) {
+	// --- Отдельный снимок исключает изменение прочитанного из ISR ---
+	static uint8_t snapshot[SCAN_UART_PENDING_SIZE];
+
+	if (out_len == NULL || out_error == NULL)
+		return NULL;
+
+	// --- Копирование и освобождение накопителя ---
+	uint32_t saved_primask = __get_PRIMASK();
+	__disable_irq();
+
+	uint16_t len = holding_len;
+
+	memcpy(snapshot, holding_buf, len);
+	holding_len = 0U;
+	*out_error = read_error;
+
+	__set_PRIMASK(saved_primask);
+
 	*out_len = len;
+
 	return len > 0U ? snapshot : NULL;
 }
 
 /*
- * Сохраняет сырое RX-событие для диагностики.
- * После подготовки к reset данные не передаются домену,
- * RX DMA не перезапускается и задача не получает новое уведомление.
+ * HAL завершил приём одного байта.
+ * Callback сохраняет байт и восстанавливает приём; SSI здесь не разбирается.
+ * При UART error повторный запуск выполняет ErrorCallback, чтобы не очистить
+ * ErrorCode до окончания ошибочной ветки HAL_UART_IRQHandler.
  */
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
-	// --- Существующая проверка источника и размера ---
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	if (huart->Instance != USART3)
 		return;
 
-	if (Size == 0 || Size > SCAN_UART_BUF_SIZE)
-		return;
+	const uint8_t byte = rx_byte;
+	const uint32_t errors = huart->ErrorCode;
 
-	// --- Диагностический снимок фактического события ---
-	ScanUart_RecordRx(Size);
+	// --- Диагностика фактического приёма сохраняется и после latch ---
+	ScanUart_RecordRx(byte);
 
-	// --- Позднее событие не продолжает отменённую операцию ---
 	if (AppSafety_IsResetPending())
 		return;
 
-	// --- Существующая передача данных домену ---
-	ScanUart_CaptureRx(Size, rx_event_type == 1U);
-	memcpy((void*) holding_buf, dma_buffer, Size);
-	holding_len = Size;
+	// --- Независимый сырой capture, включая повреждённый байт ---
+	if (capture_active) {
+		capture.errors |= errors;
 
-	(void) ScanUart_StartRx();
+		if (capture.length < SCAN_UART_CAPTURE_SIZE)
+			capture.bytes[capture.length++] = byte;
+		else
+			capture.overflow = true;
+	}
 
-	osThreadFlagsSet(task_scan_contrHandle, FLAG_SCAN_UART_RX);
+	// --- Добавление к непрочитанным данным текущего обмена ---
+	if (read_active) {
+		if (errors != HAL_UART_ERROR_NONE
+				|| holding_len == SCAN_UART_PENDING_SIZE)
+			read_error = true;
+		else
+			holding_buf[holding_len++] = byte;
+	}
+
+	// --- Повторный запуск и уведомление задачи ---
+	if (errors == HAL_UART_ERROR_NONE)
+		(void) ScanUart_StartRx();
+
+	ScanUart_NotifyRead();
 }

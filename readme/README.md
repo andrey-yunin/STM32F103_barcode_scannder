@@ -56,7 +56,20 @@ CAN protocol documentation:
 ```
 
 
-## Current Scanner handoff — 2026-10-30
+## Current Scanner handoff — 2026-11-02
+
+Start with [canonical handoff](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md)
+and the latest section of the [unification plan](../../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).
+Session snapshot: [checkpoints/20261102](checkpoints/20261102/).
+RX/TX UART IT and RX128B are implemented; RX closure has HOST13/Debug evidence.
+Next agreed work: F002/F006 controlled STOP-only shutdown with a shared
+3-second preparation budget; implementation is still open. F003 Flash/UART
+arbitration follows. Hardware acceptance is open. This snapshot is based on
+57740f3 and is committed with the runtime/config changes at the user's request.
+Use git log -1 --oneline for the resulting commit. No push or target actions
+were requested.
+
+## Historical Scanner handoff — 2026-10-30
 
 Start with [canonical handoff](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md)
 and [unification plan](../../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).

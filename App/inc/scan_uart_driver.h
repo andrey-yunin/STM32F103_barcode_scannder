@@ -13,8 +13,14 @@
 
 #define SCAN_UART_BUF_SIZE      128
 
+// --- Накопитель непрочитанных байтов обмена Scanner ---
+// ISR добавляет байты, задача забирает их и освобождает место.
+// 128B выбраны с запасом для рассчитанного цикла с 17-байтовой
+// строкой без prefix/suffix: 36B штатно, 84B с двумя повторами DATA.
+#define SCAN_UART_PENDING_SIZE  128U
+
 // --- Board-specific raw RX snapshot, captured before SSI decoding ---
-// Last HAL RX event, not a complete scan transaction or a continuous UART log.
+// Last HAL RX completion: one byte in interrupt mode, not a complete scan or log.
 typedef struct {
 	uint32_t sequence;
 	uint32_t tick_ms;
@@ -40,7 +46,7 @@ bool ScanUart_StartRx(void);
 // Task-only hardware AIM/WAKE low pulse, then >=10 ms settling.
 // False means no following SSI command may be submitted.
 bool ScanUart_Wake(void);
-// Task-only synchronous SSI handshake; DMA sends each byte after RTS grant.
+// Task-only synchronous SSI handshake; UART IT sends each byte after RTS grant.
 // CTS is released on every exit; false includes handshake/transport failure.
 bool ScanUart_Send(const uint8_t *data, uint16_t len);
 
@@ -67,6 +73,19 @@ typedef struct {
 void ScanUart_BeginCapture(void);
 void ScanUart_EndCapture(ScanUartCapture_t *out);
 
-const uint8_t* ScanUart_GetReceived(uint16_t *out_len);
+// --- Границы накопления ответа; вызывает только задача Scanner ---
+// BeginRead удаляет старые данные и уведомление перед wake/START.
+// Возвращает false, если открыть приём ответа невозможно.
+bool ScanUart_BeginRead(void);
+
+// Закрывает накопление, сохраняя диагностику и независимый raw capture.
+// Возвращает false, если при приёме текущего ответа произошла ошибка.
+bool ScanUart_EndRead(void);
+
+// --- Передача накопленных байтов задаче ---
+// Возвращает устойчивый снимок и освобождает накопитель для новых байтов.
+// Снимок действителен до следующего вызова; ISR его не изменяет.
+// out_error сообщает ошибку текущего приёма, даже при отсутствии байтов.
+const uint8_t* ScanUart_GetReceived(uint16_t *out_len, bool *out_error);
 
 #endif /* INC_SCAN_UART_DRIVER_H_ */
