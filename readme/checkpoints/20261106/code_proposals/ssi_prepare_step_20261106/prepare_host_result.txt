@@ -1,0 +1,21 @@
+PASS preparation scenario0: STOP/ACK, FLUSH/ACK, START, one fresh result per read
+PASS preparation scenario17: STOP/ACK, FLUSH/ACK, START, one fresh result per read
+PASS preparation scenario18: STOP/ACK, FLUSH/ACK, START, one fresh result per read
+PASS preparation scenario30: STOP/ACK, FLUSH/ACK, START, one fresh result per read
+PASS preparation scenario31: STOP/ACK, FLUSH/ACK, START, one fresh result per read
+PASS failure scenario10: existing NACK=E601; failed preparation admits no START; next read succeeds
+PASS failure scenario11: existing NACK=E601; failed preparation admits no START; next read succeeds
+PASS failure scenario12: existing NACK=E602; failed preparation admits no START; next read succeeds
+PASS failure scenario13: existing NACK=E602; failed preparation admits no START; next read succeeds
+PASS failure scenario14: existing NACK=E602; failed preparation admits no START; next read succeeds
+PASS failure scenario15: existing NACK=E602; failed preparation admits no START; next read succeeds
+PASS failure scenario3: existing NACK=E603; failed preparation admits no START; next read succeeds
+PASS failure scenario26: existing NACK=E602; failed preparation admits no START; next read succeeds
+PASS failure scenario27: existing NACK=E602; failed preparation admits no START; next read succeeds
+PASS failure scenario28: existing NACK=E602; failed preparation admits no START; next read succeeds
+PASS failure scenario34: existing NACK=E603; failed preparation admits no START; next read succeeds
+PASS reset scenario19: existing STOP-only shutdown and DEVICE_BUSY
+PASS reset scenario20: existing STOP-only shutdown and DEVICE_BUSY
+PASS reset scenario21: existing STOP-only shutdown and DEVICE_BUSY
+PASS reset scenario23: existing STOP-only shutdown and DEVICE_BUSY
+20 intermediate scenarios / 36 commands; barcode recovery loop not installed or claimed; BENCH NOT RUN.

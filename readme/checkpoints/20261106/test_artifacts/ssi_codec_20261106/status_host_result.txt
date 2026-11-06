@@ -1,0 +1,2 @@
+PASS independent golden vectors: unchanged START, retransmitted START, FLUSH_QUEUE, SSI NAK RESEND
+PASS explicit status participates in checksum; maximum payload; status0 equivalence; invalid arguments

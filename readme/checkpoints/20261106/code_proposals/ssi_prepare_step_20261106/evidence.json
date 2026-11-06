@@ -1,0 +1,26 @@
+{
+  "status": "PROPOSED, not installed",
+  "scope": "task preparation only; 2 insertions in 1 file",
+  "host": "20 scenarios / 36 commands ASan/UBSan PASS; shutdown18 groups PASS",
+  "arm": "task per-file ARM GCC13.3.1 Wall/Wextra/Werror compilation PASS",
+  "settings_proposed": {
+    "control_reply_ms": 2000,
+    "host_control_resends": 2
+  },
+  "base_sha256": {
+    "App/src/tasks/task_scan_controller.c": "f17087c4e0cbb9a5093ac45f605b118ea38b98857386f771d7e461b6104011ac"
+  },
+  "candidate_sha256": {
+    "App/src/tasks/task_scan_controller.c": "271a0055c7f3e7ec392210b18991a297756150cf9308ac2c6db464d665075fde"
+  },
+  "manual_replay": "PASS",
+  "project_hash_unchanged": true,
+  "build": "NOT RUN",
+  "release": "NOT RUN",
+  "bench": "NOT RUN",
+  "limitations": [
+    "Barcode recovery loop/controller still unchanged",
+    "Physical STOP/FLUSH/EE=1 unverified",
+    "No shared preparation deadline; added time not accounted for by Studio timeout+7 worst-case"
+  ]
+}

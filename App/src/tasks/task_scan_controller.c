@@ -22,6 +22,39 @@
 #include <string.h>
 #include "app_safety.h"
 
+// --- Учёт операций до очереди, во время обработки и при startup ---
+// Начальная единица удерживает BUSY ещё до первого запуска задачи Scanner.
+// Dispatcher добавляет единицу до enqueue и снимает её при отказе очереди.
+// Задача снимает единицу после всей обработки, включая завершающий UART TX.
+static volatile uint32_t scan_pending_commands = 1U;
+
+// --- Резервирование команды Dispatcher до её публикации в очереди ---
+void ScanTask_ReserveCommand(void) {
+	const uint32_t saved_primask = __get_PRIMASK();
+	__disable_irq();
+	scan_pending_commands++;
+	__set_PRIMASK(saved_primask);
+}
+
+// --- Завершение ровно одного ранее зарезервированного владения ---
+void ScanTask_ReleaseCommand(void) {
+	const uint32_t saved_primask = __get_PRIMASK();
+	__disable_irq();
+	scan_pending_commands--;
+	__set_PRIMASK(saved_primask);
+}
+
+// --- Допуск F003 без ожидания завершения доменных операций ---
+// После чтения нуля только Dispatcher может добавить новую команду;
+// пока он выполняет Commit, новых enqueue не будет. IRQ во Flash разрешены.
+bool ScanTask_IsFlashCommitBusy(void) {
+	const uint32_t saved_primask = __get_PRIMASK();
+	__disable_irq();
+	const bool busy = scan_pending_commands != 0U;
+	__set_PRIMASK(saved_primask);
+	return busy;
+}
+
 // --- Подтверждение подготовки; единственный писатель — задача Scanner ---
 static volatile bool scan_reset_prepared = false;
 
@@ -31,9 +64,62 @@ bool ScanTask_IsResetPrepared(void) {
 }
 
 /*
- * Вызывается только задачей Scanner, вне выполняющегося UART TX.
- * Отменяет доменное состояние и публикует подтверждение один раз.
- * Latch не снимается; новые операции до reset запрещены.
+ * Проверяет первый ответ нового STOP-handshake; вызывается задачей Scanner.
+ * До отпускания CTS драйвер отбросил прежний RX. По SSI §1-4/1-5 ответ
+ * на новую команду предшествует отложенному прежнему сообщению.
+ * ACK не ищется среди посторонних пакетов: NAK/неверный ответ означает отказ.
+ */
+static bool Scan_WaitResetStopAck(void) {
+	uint8_t packet[6];
+	uint16_t used = 0U;
+
+	// --- Один ACK может поступить несколькими RX-фрагментами ---
+	while (!AppSafety_IsResetPreparationExpired()) {
+		uint16_t length;
+		bool error;
+		const uint8_t *received = ScanUart_GetReceived(&length, &error);
+
+		if (error)
+			return false;
+
+		if (received != NULL) {
+			uint16_t count = (uint16_t) (sizeof(packet) - used);
+			if (count > length)
+				count = length;
+
+			memcpy(&packet[used], received, count);
+			used += count;
+
+			// CMD_ACK без payload имеет Length=4, всего 6 байт.
+			if (packet[0] != 4U)
+				return false;
+
+			if (used == sizeof(packet)) {
+				SsiMsg_t message;
+				return !AppSafety_IsResetPreparationExpired()
+						&& Ssi_Decode(packet, sizeof(packet), &message)
+						&& message.opcode == SSI_OP_CMD_ACK
+						&& message.msg_src == SSI_MSG_SRC_DECODER
+						&& message.data_len == 0U
+						&& (message.status & 0x02U) == 0U;
+			}
+		}
+
+		// --- Прогресс ограниченного ожидания, без нового срока ---
+		if (osDelay(1U) != osOK)
+			return false;
+
+		AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+	}
+
+	return false;
+}
+
+/*
+ * Вызывается только задачей Scanner после возврата из обычного UART TX.
+ * При F002/F006 всегда выполняет STOP: состояние контроллера MCU само по
+ * себе не подтверждает состояние внешнего модуля. Это не STOP после успеха
+ * обычной команды чтения; здесь выполняется отдельная подготовка reset.
  */
 static bool Scan_SyncResetState(void) {
 	// --- Проверка запроса и ранее завершённой подготовки ---
@@ -43,20 +129,29 @@ static bool Scan_SyncResetState(void) {
 	if (scan_reset_prepared)
 		return true;
 
-	// --- Остановка RX и отмена текущего состояния ---
-	if (!ScanUart_CancelRx()) {
+	// --- Только STOP; прежняя операция уже не может стать успешной ---
+	uint8_t packet[6];
+	const uint8_t length = Ssi_Encode(SSI_OP_STOP_DECODE, NULL, 0U, packet);
+	bool stopped = ScanUart_SendStopForReset(packet, length)
+			&& Scan_WaitResetStopAck();
+
+	// --- Окончательное закрытие RX, включая отказ подготовки ---
+	const bool read_ok = ScanUart_EndRead();
+	const bool closed = ScanUart_CancelRx();
+
+	if (!stopped || !read_ok || !closed
+			|| AppSafety_IsResetPreparationExpired())
 		Error_Handler();
-	}
 
 	ScanCtrl_HandleTransportError();
 
-	// --- Удаление уведомления отменённой операции ---
+	// --- Очистка уведомления отменённого обмена ---
 	uint32_t flags = osThreadFlagsClear(FLAG_SCAN_UART_RX);
-	if ((flags & osFlagsError) != 0U) {
+	if ((flags & osFlagsError) != 0U
+			|| AppSafety_IsResetPreparationExpired())
 		Error_Handler();
-	}
 
-	// --- Публикация подтверждения после завершения подготовки ---
+	// --- Только подтверждённая подготовка разрешает service/Flash ---
 	__DMB();
 	scan_reset_prepared = true;
 
@@ -121,6 +216,114 @@ static bool Scan_CollectPacket(const uint8_t *data, uint16_t len,
 	}
 
 	return false;
+}
+
+// --- SSI host response limit: project policy matches the existing 2 s RTS bound ---
+// This is a software limit, not readback of the module's current parameter.
+#define SCAN_SSI_RESPONSE_TIMEOUT_MS 2000U
+
+// --- At most three transmissions of the same explicitly rejected host packet ---
+// Host retry limit is a proposed Scanner adaptation. The SSI guide separately
+// specifies two retries for decoder data and requires the host to limit retries.
+#define SCAN_SSI_HOST_RESENDS 2U
+
+/*
+ * Receives only the first answer of a freshly established control handshake.
+ * STOP/FLUSH expect ACK, not a barcode. Old postponed data after this answer
+ * is discarded by EndRead; the following control handshake opens a new boundary.
+ * Valid NAK requests no ACK/NAK response. RESEND asks to retransmit the same
+ * command with the status bit; it does not silently authorize a new operation.
+ */
+static uint16_t Scan_WaitControlReply(bool *resend) {
+    uint8_t packet[7];
+    uint16_t used = 0U;
+    const uint32_t started = osKernelGetTickCount();
+    const uint32_t duration = (uint32_t) (((uint64_t)
+            SCAN_SSI_RESPONSE_TIMEOUT_MS * osKernelGetTickFreq()) / 1000U);
+    *resend = false;
+
+    // --- One bounded reply; reset is finalized by the caller's domain path ---
+    while (!AppSafety_IsResetPending()
+            && (uint32_t) (osKernelGetTickCount() - started) < duration) {
+        uint16_t length;
+        bool error;
+        const uint8_t *received = ScanUart_GetReceived(&length, &error);
+        if (error)
+            return CAN_ERR_SCAN_COMM;
+
+        for (uint16_t i = 0U; received != NULL && i < length; ++i) {
+            packet[used++] = received[i];
+            if (packet[0] != 4U && packet[0] != 5U)
+                return CAN_ERR_SCAN_COMM;
+            if (used < (uint16_t) packet[0] + 2U)
+                continue;
+
+            SsiMsg_t message;
+            if ((uint32_t) (osKernelGetTickCount() - started) >= duration
+                    || !Ssi_Decode(packet, used, &message)
+                    || message.msg_src != SSI_MSG_SRC_DECODER
+                    || (message.status & (uint8_t) ~SSI_STATUS_RETRANSMIT) != 0U)
+                return CAN_ERR_SCAN_COMM;
+
+            if (message.opcode == SSI_OP_CMD_ACK && message.data_len == 0U)
+                return CAN_ERR_NONE;
+
+            if (message.opcode == SSI_OP_CMD_NAK && message.data_len == 1U) {
+                *resend = message.data[0] == SSI_NAK_RESEND;
+                return *resend ? CAN_ERR_SCAN_COMM : CAN_ERR_SCAN_HARDWARE;
+            }
+
+            return CAN_ERR_SCAN_COMM;
+        }
+
+        if (osDelay(1U) != osOK)
+            return CAN_ERR_SCAN_COMM;
+        AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+    }
+    return CAN_ERR_SCAN_COMM;
+}
+
+/*
+ * One idempotent preparation command, including RX ownership and response.
+ * Only an explicit decoder RESEND permits retransmission. Timeout is not
+ * treated as proof that the command was rejected. A failed boundary forbids START.
+ */
+static uint16_t Scan_RunPreparationCommand(uint8_t opcode) {
+    for (uint32_t attempt = 0U; attempt <= SCAN_SSI_HOST_RESENDS; ++attempt) {
+        if (!ScanUart_BeginRead())
+            return CAN_ERR_SCAN_COMM;
+
+        uint8_t packet[6];
+        uint8_t length = Ssi_EncodeWithStatus(opcode,
+                attempt == 0U ? 0U : SSI_STATUS_RETRANSMIT, NULL, 0U, packet);
+        if (!ScanUart_Wake() || !ScanUart_SendForReply(packet, length)) {
+            (void) ScanUart_EndRead();
+            return CAN_ERR_SCAN_COMM;
+        }
+
+        bool resend;
+        uint16_t result = Scan_WaitControlReply(&resend);
+        if (!ScanUart_EndRead())
+            return CAN_ERR_SCAN_COMM;
+        if (AppSafety_IsResetPending())
+            return CAN_ERR_SCAN_COMM;
+        if (!resend)
+            return result;
+    }
+    return CAN_ERR_SCAN_COMM;
+}
+
+/*
+ * Defines a module-side boundary for every new barcode reading.
+ * A STOP ACK confirms the old decode session stopped; FLUSH ACK confirms its
+ * queued packets were eliminated. Neither MCU buffer reset nor START ACK alone
+ * establishes this boundary. Physical support remains subject to BENCH.
+ */
+static uint16_t Scan_PrepareRead(void) {
+    uint16_t result = Scan_RunPreparationCommand(SSI_OP_STOP_DECODE);
+    if (result != CAN_ERR_NONE)
+        return result;
+    return Scan_RunPreparationCommand(SSI_OP_FLUSH_QUEUE);
 }
 
 // --- Read-only revision probe or single BEEP: DONE means RX capture complete ---
@@ -217,7 +420,17 @@ void app_start_task_scan_controller(void *argument) {
 	const uint32_t idle_wait_ticks = (APP_WATCHDOG_TASK_IDLE_TIMEOUT_MS
 			* osKernelGetTickFreq()) / 1000U;
 
+	// --- Первое владение соответствует завершённой startup-последовательности ---
+	bool release_pending = true;
+
 	for (;;) {
+		// --- Единая точка завершения startup либо предыдущей команды ---
+		// Все continue внешнего цикла проходят здесь; внутреннее ожидание RX
+		// не снимает владение. Ошибка/timeout пустой очереди не создают владение.
+		if (release_pending) {
+			ScanTask_ReleaseCommand();
+			release_pending = false;
+		}
 
 		// --- Подготовка выполняется и при отсутствии команд ---
 		(void) Scan_SyncResetState();
@@ -239,6 +452,10 @@ void app_start_task_scan_controller(void *argument) {
 		if (queue_status != osOK) {
 			continue;
 		}
+
+		// --- Принятие владения, уже зарезервированного Dispatcher ---
+		// Dequeue не уменьшает счётчик: он остаётся занят до конца обработки.
+		release_pending = true;
 
 		// --- Команда получена и передаётся на обработку ---
 		AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
@@ -286,6 +503,19 @@ void app_start_task_scan_controller(void *argument) {
 		// --- Запуск состояния текущего запроса ---
 		if (!ScanCtrl_StartScan(cmd.timeout_sec)) {
 			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_DEVICE_BUSY);
+			continue;
+		}
+
+		// --- Confirmed module-side boundary before a new reading ---
+		uint16_t prepare_error = Scan_PrepareRead();
+		if (prepare_error != CAN_ERR_NONE) {
+			if (Scan_SyncResetState() || !Scan_TryAcceptTerminalResult()) {
+				(void) Scan_SyncResetState();
+				CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_DEVICE_BUSY);
+			} else {
+				ScanCtrl_HandleTransportError();
+				CAN_SendNackPublic(cmd.cmd_code, prepare_error);
+			}
 			continue;
 		}
 

@@ -1,0 +1,1 @@
+PASS ARM GCC syntax/type/include only

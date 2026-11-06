@@ -1,0 +1,25 @@
+PASS pair scenario0: first NACK=0000 DONE=1; second read DATA/DONE; one terminal each
+PASS pair scenario1: first NACK=E601 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario2: first NACK=E602 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario3: first NACK=E603 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario5: first NACK=E602 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario6: first NACK=E603 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario7: first NACK=0000 DONE=1; second read DATA/DONE; one terminal each
+PASS pair scenario8: first NACK=0000 DONE=1; second read DATA/DONE; one terminal each
+PASS pair scenario9: first NACK=E602 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario11: first NACK=E602 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario12: first NACK=E602 DONE=0; second read DATA/DONE; one terminal each
+PASS pair scenario14: first NACK=E601 DONE=0; second read DATA/DONE; one terminal each
+REPRODUCED U21-A: valid unexpected SSI A4 -> E601 but state stays SCANNING; next request DEVICE_BUSY
+REPRODUCED U21-B: DECODE_DATA with only Type -> SSI ACK, CAN DONE with zero CAN DATA, empty saved barcode
+PASS first-command startup transport fault1 -> NACK=E601; next read DATA/DONE
+PASS first-command startup transport fault2 -> NACK=E601; next read DATA/DONE
+PASS first-command startup transport fault3 -> NACK=E601; next read DATA/DONE
+PASS first-command startup transport fault4 -> NACK=E601; next read DATA/DONE
+PASS first-command startup transport fault5 -> NACK=E601; next read DATA/DONE
+PASS first-command startup transport fault6 -> NACK=E601; next read DATA/DONE
+PASS first-command startup transport fault7 -> NACK=E601; next read DATA/DONE
+PASS first-command startup transport fault8 -> NACK=E602; next read DATA/DONE
+PASS RTOS flags error -> E602 and malformed SSI length -> E601; subsequent read succeeds
+REPRODUCED U21-C: capture ignores 3000 RTOS delay errors, continues heartbeat, emits capture response/DONE; next read succeeds
+Installed C, deterministic HAL/RTOS model; injected valid SSI packets and RTOS failures; BENCH NOT RUN.

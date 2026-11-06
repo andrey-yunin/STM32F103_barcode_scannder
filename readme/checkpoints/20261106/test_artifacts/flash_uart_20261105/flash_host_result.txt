@@ -1,0 +1,15 @@
+PASS F003 BUSY before task startup; no Flash or reset-latch
+PASS reserve/release/snapshot preserve enabled and disabled PRIMASK
+PASS actual Dispatcher reserves all four domain commands before queue publication; queued F003 BUSY
+PASS failed enqueue rolls back exactly once; overflow and BUSY preserved; subsequent Commit succeeds
+PASS consumer completes before Put returns: reservation ordering avoids gap or leaked busy
+PASS startup plus queued/in-flight reservations remain busy until final owner releases
+PASS 13 actual scan paths: busy through startup/UART/waits/terminal/ACK/failure STOP; released once afterward
+PASS revision/BEEP capture, GET_DATA empty and unknown command outer continue release exactly once
+PASS GET_DATA cached barcode success releases once after DATA/DONE
+PASS queue timeout/error do not double-release; StartScan rejection releases command
+PASS BeginRead/wake/START TX and capture wake/TX early failures release exactly once
+PASS capture cancellation before start and during wait retains busy until STOP/RX closure
+PASS failed startup wake/ENABLE TX releases initial ownership after synchronous return
+PASS Commit bool DONE/FLASH_WRITE and next enqueue after either outcome; IRQ remain enabled
+HAL/RTOS deterministic model of extracted candidate C only; BUILD/BENCH not implied.

@@ -1,0 +1,9 @@
+PASS STOP-only API: latch required, exact packet required; ordinary Wake/Send/START remain gated
+PASS buffered old ACK + old ACK during CTS LOW discarded; earliest new ACK retained; D502 unchanged
+PASS TX success does not claim ACK or prepared; old ACK alone gives no retained response
+PASS RTS grant, HAL TX and byte completion failures are bounded; TX abort precedes buffer return
+PASS shared deadline before TX, during bytes and at last completion; no deadline restart
+PASS reset at 6 START positions, late TX callback and old partial exchange before new STOP handshake
+PASS RX rearm/flag clear/closed RX prevent STOP launch
+PASS normal START still completes and retains D502
+Intermediate driver candidate only: current task/Dispatcher unchanged; no full shutdown or BENCH claim

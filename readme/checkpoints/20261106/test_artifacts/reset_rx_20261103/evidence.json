@@ -1,0 +1,17 @@
+{
+  "scope": "installed RX-only block; STOP TX and Dispatcher unchanged",
+  "authorization": "user explicit: можешь внести изменения; preceding RX block only",
+  "host": "PASS RX boundaries and 13 prior task scenarios",
+  "debug": "incremental make -j4 all PASS; 0 errors/0 warnings",
+  "size": {
+    "text": 45996,
+    "data": 68,
+    "bss": 15136
+  },
+  "bench": "NOT RUN",
+  "release": "NOT RUN",
+  "sha256": {
+    "App/src/scan_uart_driver.c": "2b012aa9aaa5de68cf599bf075c1f17ff27d2f73b240f28d384e585d34505aee",
+    "Debug/STM32F103_scanner.elf": "95b9f98c77fd320c827ec51990b8901d9228c8d594df01c1a769d7eb71c9128f"
+  }
+}

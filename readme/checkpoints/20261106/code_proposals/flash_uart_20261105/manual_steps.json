@@ -1,0 +1,38 @@
+[
+  {
+    "file": "App/inc/tasks/task_scan_controller.h",
+    "old": "// --- Подтверждение доменной подготовки к reset ---",
+    "new": "// --- Учёт queued/in-flight команд для допуска F003 ---\n// Reserve вызывается Dispatcher до enqueue; Release — при отказе enqueue\n// либо задачей Scanner после полной обработки. Busy читает только Dispatcher:\n// он единственный producer scan_queue и не ставит команды во время Commit.\nvoid ScanTask_ReserveCommand(void);\nvoid ScanTask_ReleaseCommand(void);\nbool ScanTask_IsFlashCommitBusy(void);\n\n// --- Подтверждение доменной подготовки к reset ---",
+    "explanation": "ВСТАВИТЬ объявления перед подтверждением reset."
+  },
+  {
+    "file": "App/src/tasks/task_scan_controller.c",
+    "old": "// --- Подтверждение подготовки; единственный писатель — задача Scanner ---",
+    "new": "// --- Учёт операций до очереди, во время обработки и при startup ---\n// Начальная единица удерживает BUSY ещё до первого запуска задачи Scanner.\n// Dispatcher добавляет единицу до enqueue и снимает её при отказе очереди.\n// Задача снимает единицу после всей обработки, включая завершающий UART TX.\nstatic volatile uint32_t scan_pending_commands = 1U;\n\n// --- Резервирование команды Dispatcher до её публикации в очереди ---\nvoid ScanTask_ReserveCommand(void) {\n\tconst uint32_t saved_primask = __get_PRIMASK();\n\t__disable_irq();\n\tscan_pending_commands++;\n\t__set_PRIMASK(saved_primask);\n}\n\n// --- Завершение ровно одного ранее зарезервированного владения ---\nvoid ScanTask_ReleaseCommand(void) {\n\tconst uint32_t saved_primask = __get_PRIMASK();\n\t__disable_irq();\n\tscan_pending_commands--;\n\t__set_PRIMASK(saved_primask);\n}\n\n// --- Допуск F003 без ожидания завершения доменных операций ---\n// После чтения нуля только Dispatcher может добавить новую команду;\n// пока он выполняет Commit, новых enqueue не будет. IRQ во Flash разрешены.\nbool ScanTask_IsFlashCommitBusy(void) {\n\tconst uint32_t saved_primask = __get_PRIMASK();\n\t__disable_irq();\n\tconst bool busy = scan_pending_commands != 0U;\n\t__set_PRIMASK(saved_primask);\n\treturn busy;\n}\n\n// --- Подтверждение подготовки; единственный писатель — задача Scanner ---",
+    "explanation": "ВСТАВИТЬ счётчик и три функции после includes, перед scan_reset_prepared."
+  },
+  {
+    "file": "App/src/tasks/task_scan_controller.c",
+    "old": "\tfor (;;) {\n\n\t\t// --- Подготовка выполняется и при отсутствии команд ---",
+    "new": "\t// --- Первое владение соответствует завершённой startup-последовательности ---\n\tbool release_pending = true;\n\n\tfor (;;) {\n\t\t// --- Единая точка завершения startup либо предыдущей команды ---\n\t\t// Все continue внешнего цикла проходят здесь; внутреннее ожидание RX\n\t\t// не снимает владение. Ошибка/timeout пустой очереди не создают владение.\n\t\tif (release_pending) {\n\t\t\tScanTask_ReleaseCommand();\n\t\t\trelease_pending = false;\n\t\t}\n\n\t\t// --- Подготовка выполняется и при отсутствии команд ---",
+    "explanation": "ЗАМЕНИТЬ начало внешнего for в app_start_task_scan_controller; startup выше не менять."
+  },
+  {
+    "file": "App/src/tasks/task_scan_controller.c",
+    "old": "\t\t// --- Команда получена и передаётся на обработку ---\n\t\tAppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);",
+    "new": "\t\t// --- Принятие владения, уже зарезервированного Dispatcher ---\n\t\t// Dequeue не уменьшает счётчик: он остаётся занят до конца обработки.\n\t\trelease_pending = true;\n\n\t\t// --- Команда получена и передаётся на обработку ---\n\t\tAppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);",
+    "explanation": "ВСТАВИТЬ принятие владения после успешного Get, перед heartbeat."
+  },
+  {
+    "file": "App/src/tasks/task_dispatcher.c",
+    "old": "\t\t\tif (osMessageQueuePut(scan_queueHandle, &scan_cmd, 0, 0) != osOK) {\n\t\t\t\tCAN_Diagnostics_RecordAppQueueOverflow();",
+    "new": "\t\t\t// --- Учёт начинается до enqueue и сохраняется после dequeue ---\n\t\t\tScanTask_ReserveCommand();\n\t\t\tif (osMessageQueuePut(scan_queueHandle, &scan_cmd, 0, 0) != osOK) {\n\t\t\t\t// Отказ очереди оставляет владение у Dispatcher.\n\t\t\t\tScanTask_ReleaseCommand();\n\t\t\t\tCAN_Diagnostics_RecordAppQueueOverflow();",
+    "explanation": "ЗАМЕНИТЬ начало постановки доменной команды; сохранить NACK и конец ветки."
+  },
+  {
+    "file": "App/src/tasks/task_dispatcher.c",
+    "old": "\t\tcase CAN_CMD_SRV_FLASH_COMMIT: {\n\t\t\t// --- COMMIT: сохранение RAM-конфигурации в Flash ---",
+    "new": "\t\tcase CAN_CMD_SRV_FLASH_COMMIT: {\n\t\t\t// --- Занятый домен не прерываем и не ждём ради Commit ---\n\t\t\t// Dispatcher — единственный producer scan_queue; после нулевого\n\t\t\t// снимка новая операция не появится до завершения этого handler.\n\t\t\tif (ScanTask_IsFlashCommitBusy()) {\n\t\t\t\tCAN_SendNackPublic(parsed.cmd_code, CAN_ERR_DEVICE_BUSY);\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\t// --- COMMIT: сохранение RAM-конфигурации в Flash ---",
+    "explanation": "ВСТАВИТЬ BUSY gate в начало F003; существующий bool Commit/ответы не менять."
+  }
+]

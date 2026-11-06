@@ -1,0 +1,27 @@
+{
+  "base": "ea1eacb",
+  "project_unchanged": true,
+  "syntax": "PASS",
+  "host_shutdown": "PASS",
+  "host_normal_regression": "13 PASS",
+  "build": "NOT RUN",
+  "bench": "NOT RUN",
+  "source_sha256": {
+    "App/src/app_safety.c": "cca7035355329693eb9afdffa03419a497b85b1b4af366447b8ee91ea7795205",
+    "App/inc/app_safety.h": "0511906649952db6daa761351a78be2cea21588b408d3ac83da5dfea62f444e3",
+    "App/src/tasks/task_dispatcher.c": "83b613eb0ef66ab3f9cf8f7ae07afc0587f65bfeabe1f32a96b4f34ff7e749dc",
+    "App/src/scan_uart_driver.c": "692d1d3baa4e554e7aded6aa8a5eb5a47701191d27e5e1b84569003b3d4c99f7",
+    "App/inc/scan_uart_driver.h": "006f6aff3e3866141e92443c482f25b7ced1c6a9c006fbca3a0f27174dc5f793",
+    "App/src/tasks/task_scan_controller.c": "621b3dfbe4a590cfd928318d84f260df25846265cc0baf8cff298418363824e3",
+    "App/inc/tasks/task_scan_controller.h": "f194c8b80ef28c0bed285e30f7f0a0c2de5def79b03dba66924c564eb65e3ff1"
+  },
+  "candidate_sha256": {
+    "App/src/app_safety.c": "14767b6001501de756d938bcdee989af29c5b9f36ec3ec9c34dc098f97f869d8",
+    "App/inc/app_safety.h": "c523710686ce0180af715fa754f6290de2eaa809503277d46017789a59d08987",
+    "App/src/tasks/task_dispatcher.c": "250fe3a525a5437da220d7d99ffe7f0659d8f3d740b47aaad5ca65d1b29d81b0",
+    "App/src/scan_uart_driver.c": "696fd82d54f27353e2750b5136b6f5701f5f27c05e49ebdb259283b5140cf7c7",
+    "App/inc/scan_uart_driver.h": "0c9ffa6b0598f1fd506a09de084b79bb1c4dc65fa0840c6907e35865c9c92382",
+    "App/src/tasks/task_scan_controller.c": "2af053bb676fb22ed1d87d9928f132e975e714857b1f7f365dfb9f842a1e2414",
+    "App/inc/tasks/task_scan_controller.h": "e41fcb463449869768dcc8e8f7bcc7fa7988281996276f3ed0b6f388917a887c"
+  }
+}

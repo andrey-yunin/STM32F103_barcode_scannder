@@ -1,0 +1,10 @@
+{
+  "status": "PROPOSED, not installed",
+  "scope": "RX-only intermediate step; no STOP TX/Dispatcher changes",
+  "base_driver_sha256": "692d1d3baa4e554e7aded6aa8a5eb5a47701191d27e5e1b84569003b3d4c99f7",
+  "candidate_driver_sha256": "5907f76b2189de40a5b1e05bd95b3eb5a309e4fb780fa2cce20df31d6d3b07e4",
+  "host": "RX boundary checks and 13 prior task scenarios PASS",
+  "arm_syntax": "PASS with real project headers",
+  "build": "NOT RUN",
+  "bench": "NOT RUN"
+}

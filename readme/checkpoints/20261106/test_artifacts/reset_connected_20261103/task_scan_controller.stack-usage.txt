@@ -1,0 +1,8 @@
+../App/src/tasks/task_scan_controller.c:29:6:ScanTask_IsResetPrepared	4	static
+../App/src/tasks/task_scan_controller.c:39:13:Scan_WaitResetStopAck	168	static
+../App/src/tasks/task_scan_controller.c:91:13:Scan_SyncResetState	24	static,ignoring_inline_asm
+../App/src/tasks/task_scan_controller.c:133:13:Scan_TryAcceptTerminalResult	24	static,ignoring_inline_asm
+../App/src/tasks/task_scan_controller.c:146:13:Scan_IsValidDecodeData	152	static
+../App/src/tasks/task_scan_controller.c:158:13:Scan_CollectPacket	168	static
+../App/src/tasks/task_scan_controller.c:189:13:ScanQueryRevision	440	static
+../App/src/tasks/task_scan_controller.c:262:6:app_start_task_scan_controller	512	static

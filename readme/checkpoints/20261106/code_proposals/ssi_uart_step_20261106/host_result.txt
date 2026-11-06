@@ -1,0 +1,19 @@
+PASS idle/old buffered ACK + ACK during STOP: only new STOP response prepares; late callbacks cannot rearm
+PASS old ACK without STOP response never prepares; total timeout 3000 ms
+PASS RTS never grants STOP: local bound remains, preparation fails
+PASS HAL TX error: no prepared
+PASS STOP NAK followed by old ACK: failure, no search for later ACK
+PASS STOP ACK checksum error
+PASS STOP RX ORE error
+PASS ACK exactly at common deadline rejected
+PASS bytewise fragmented STOP ACK
+PASS STOP ACK first, old reply after it: one prepared
+PASS reset at each accepted START byte, abort/late TX callback and old partial-message interval
+PASS shared deadline across HAL tick wrap
+PASS task scheduling/old exchange consume shared budget; repeated latch cannot extend it
+PASS rearm/clear/notify/RX abort/osDelay/TX completion failures: no prepared
+PASS normal Wake/Send/START/StartRx remain forbidden; shutdown rejects non-STOP packet
+PASS actual F002/F006 handlers: key first, STOP before service/Flash, failed prepare blocks Flash/DONE
+PASS factory Flash failure keeps NACK/reset policy
+PASS actual task queued/in-flight scan cancellation: DEVICE_BUSY, no DATA/DONE, one STOP
+HAL/RTOS deterministic model of candidate C only; no BENCH and no installed firmware change.

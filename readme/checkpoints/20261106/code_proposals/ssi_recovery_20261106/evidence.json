@@ -1,0 +1,15 @@
+{
+  "status": "INCOMPLETE PROPOSED preparation; not installed; full recovery not ready",
+  "scope": "private packet assembler/classifier preparation only",
+  "host": "ASan/UBSan: 63 snapshot splits, bytewise/combined packets, checksum-to-RESEND event, NAK causes, malformed/empty/source/status checks PASS",
+  "isolation": "Receive-only ambiguity confirmed. STOP+confirmed FLUSH_QUEUE boundary proposed but not agreed or implemented; actual module support unverified",
+  "full_operation_host": "NOT RUN",
+  "build": "NOT RUN",
+  "bench": "NOT RUN",
+  "firmware_hashes_unchanged": true,
+  "files": {
+    "receive_helpers.inc": "c3c98bff36a5a391b01287f634f0cc29c1dc53b6ac052b1f52d7b5ddbb833d68",
+    "receive_host.c": "9853675a7e45fab337b0a550f79c503f49aa53a8341e1f5f48a51181175e7db6",
+    "BOUNDARY_PROPOSAL.md": "84e9450244b2117b51c20c7f59ca53ee758bb154e2753301f7c1871162a691db"
+  }
+}

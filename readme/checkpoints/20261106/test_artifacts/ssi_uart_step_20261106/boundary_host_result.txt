@@ -1,0 +1,11 @@
+PASS no owner/invalid args: no TX and no armed reply boundary
+PASS prior/before-TC ACK discarded, new ACK admitted at CTS HIGH; D501 raw retained and D502 unchanged
+PASS old ACK without new reply leaves no received reply; Send success is not ACK confirmation
+PASS UART error during pre-TC drain remains latched across reply boundary
+PASS existing RX error blocks transmission without clearing error evidence
+PASS HAL_BUSY clears boundary and releases CTS; next explicit exchange succeeds
+PASS missing TX completion aborts before buffer return; no boundary leak
+PASS immediate RTOS delay failure aborts TX and clears normal boundary
+PASS reset at each of six TX bytes: normal path closes, reset STOP succeeds, late callbacks cannot reopen RX
+PASS normal reply TX never bypasses reset latch
+Driver-only intermediate candidate; task, controller and operation policy unchanged; BENCH NOT RUN.

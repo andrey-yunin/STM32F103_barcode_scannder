@@ -1,0 +1,11 @@
+{
+  "status": "PROPOSED, not installed",
+  "scope": "one existing error branch in task_scan_controller.c; call existing ScanCtrl_HandleTransportError before existing E601",
+  "comparison": "Same helper already used by BeginRead, START TX and RX/ACK failure branches; same command, E601, STOP order, reset gates and packet selection preserved",
+  "host": "25 command pairs / 50 commands completed; U21-A next read now DATA/DONE; 22 previously passing pairs preserved; U21-B/C still reproduced and OPEN",
+  "syntax": "ARM GCC13.3.1 Wall/Wextra/Werror PASS",
+  "build": "NOT RUN",
+  "bench": "NOT RUN",
+  "base_sha256": "f17087c4e0cbb9a5093ac45f605b118ea38b98857386f771d7e461b6104011ac",
+  "candidate_sha256": "f7ff500f571332370218097291a610259ec393c1da81456d98ba3648be89fc0a"
+}

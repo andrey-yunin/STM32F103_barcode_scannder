@@ -18,26 +18,40 @@ static uint16_t Ssi_Checksum(const uint8_t *data, uint16_t len)
     return (uint16_t)(0U - sum);
 }
 
-// --- Encode one packet; Length includes the four-byte header ---
-uint8_t Ssi_Encode(uint8_t opcode, const uint8_t *data,
-                   uint16_t data_len, uint8_t *out_packet)
+// --- Encode one packet, including the explicit retransmission status ---
+uint8_t Ssi_EncodeWithStatus(uint8_t opcode, uint8_t status,
+                           const uint8_t *data, uint16_t data_len,
+                           uint8_t *out_packet)
 {
     if (out_packet == NULL || data_len > SSI_MAX_PAYLOAD ||
-        (data_len != 0 && data == NULL)) return 0;
+        (data_len != 0 && data == NULL)) {
+        return 0;
+    }
 
+    // --- SSI header and payload ---
     uint16_t idx = 0;
     out_packet[idx++] = (uint8_t)(4 + data_len);
     out_packet[idx++] = opcode;
     out_packet[idx++] = SSI_MSG_SRC_HOST;
-    out_packet[idx++] = 0x00;
+    out_packet[idx++] = status;
+
     for (uint16_t i = 0; i < data_len; i++) {
         out_packet[idx++] = data[i];
     }
 
+    // --- Checksum includes the selected status byte ---
     uint16_t checksum = Ssi_Checksum(out_packet, idx);
     out_packet[idx++] = (uint8_t)(checksum >> 8);
     out_packet[idx++] = (uint8_t)checksum;
+
     return (uint8_t)idx;
+}
+
+// --- Preserve the existing API for a first transmission ---
+uint8_t Ssi_Encode(uint8_t opcode, const uint8_t *data,
+                   uint16_t data_len, uint8_t *out_packet)
+{
+    return Ssi_EncodeWithStatus(opcode, 0U, data, data_len, out_packet);
 }
 
 // --- Validate the first complete packet before publishing its contents ---

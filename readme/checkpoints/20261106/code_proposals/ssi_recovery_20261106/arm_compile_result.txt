@@ -1,0 +1,5 @@
+ARM GCC13.3.1 per-file compilation, not firmware link/build
+App/src/scan_uart_driver.c: PASS
+App/src/scan_controller.c: PASS
+App/src/scan_ssi.c: PASS
+App/src/tasks/task_scan_controller.c: PASS

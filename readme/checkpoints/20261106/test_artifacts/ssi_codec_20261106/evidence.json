@@ -1,0 +1,28 @@
+{
+  "status": "INSTALLED codec block only; explicit user permission",
+  "scope": [
+    "App/src/scan_ssi.c",
+    "App/inc/scan_ssi.h"
+  ],
+  "comparison": "C tokens match checked candidate after adding braces around the existing argument guard, as in the issued code; comments/formatting differ",
+  "other_app_sources": "SHA256 unchanged",
+  "host": "Existing codec tests and explicit status/golden vectors/max payload/invalid arguments ASan/UBSan PASS",
+  "debug": "incremental make -j4 all PASS; 0 errors/0 warnings; not clean build",
+  "size": {
+    "text": 47332,
+    "data": 72,
+    "bss": 15136
+  },
+  "release": "NOT RUN",
+  "bench": "NOT RUN",
+  "limits": [
+    "UART driver and task recovery not installed",
+    "New FLUSH_QUEUE constant does not send commands by itself",
+    "No commit, flash or hardware commands"
+  ],
+  "sha256": {
+    "App/src/scan_ssi.c": "880325c4a3e521485bb1056fe307864dc41d7a36c405ff749b9d2b5f996310bc",
+    "App/inc/scan_ssi.h": "091f662e048939abb89614d3814e35ae41d66090922d0e90d057014379134b1c",
+    "Debug/STM32F103_scanner.elf": "0961307d0f6f4717bcc9b9265d159e5a7fb53fe130c55308a1fdb826a04a16dc"
+  }
+}

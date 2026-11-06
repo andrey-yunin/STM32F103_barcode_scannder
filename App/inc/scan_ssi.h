@@ -24,6 +24,14 @@
 #define SSI_OP_SCAN_ENABLE      0xE9
 #define SSI_OP_START_DECODE     0xE4
 #define SSI_OP_STOP_DECODE      0xE5
+#define SSI_OP_FLUSH_QUEUE      0xD2
+
+// --- SSI status and NAK causes; these are not CAN error codes ---
+#define SSI_STATUS_RETRANSMIT   0x01U
+#define SSI_NAK_RESEND          0x01U
+#define SSI_NAK_BAD_CONTEXT     0x02U
+#define SSI_NAK_DENIED          0x06U
+#define SSI_NAK_CANCEL          0x0AU
 #define SSI_OP_BEEP             0xE6
 #define SSI_OP_LED_ON           0xE7
 #define SSI_OP_LED_OFF          0xE8
@@ -47,6 +55,12 @@ typedef struct {
 // Caller supplies SSI_PACKET_MAX_LEN bytes; returns 0 on invalid arguments.
 uint8_t Ssi_Encode(uint8_t opcode, const uint8_t *data,
                     uint16_t data_len, uint8_t *out_packet);
+
+// --- Same packet encoding with an explicit SSI status byte ---
+// Used only for retransmission of the same host command.
+uint8_t Ssi_EncodeWithStatus(uint8_t opcode, uint8_t status,
+                           const uint8_t *data, uint16_t data_len,
+                           uint8_t *out_packet);
 
 // Decodes the first packet; trailing bytes are allowed, no stream assembly.
 // Returns false without modifying out_msg when validation fails.

@@ -56,7 +56,36 @@ CAN protocol documentation:
 ```
 
 
-## Current Scanner handoff — 2026-11-02
+## Current Scanner handoff — 2026-11-06
+
+Start with the [canonical handoff](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md)
+and [checkpoint/20261106](checkpoints/20261106/README.md).
+Installed over ea1eacb: reset STOP/ACK with shared3s, F003 startup/queued/
+in-flight guard, SSI status codec, normal UART RX reply boundary and confirmed
+STOP/FLUSH before each new START. Latest HOST preparation20 scenarios/36commands
+and shutdown18 groups PASS; Debug incremental BUILD PASS (48740/72/15136),
+also confirmed by the user. Release/BENCH remain open.
+
+Next: barcode SSI recovery loop and nonempty barcode validation in controller.
+These changes are NOT installed. The earlier full candidate must be compared
+with the current tree; its20 steps already contain installed components.
+External operation timeout/Studio window integration remains OPEN.
+Current state is saved in a normal commit over ea1eacb at the user's request;
+use git log -1 for its hash. No push or hardware actions were requested.
+
+## Historical Scanner handoff — verified 2026-11-05
+
+Read the [canonical handoff](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md)
+and the final 2026-11-03 entry in the shared unification plan. F002/F006
+STOP-only shutdown, ACK validation, RX closure and prepared gate are installed
+with one shared 3000 ms budget. Seven App files remain uncommitted over ea1eacb.
+Their hashes and the Debug ELF match reset_connected_20261103 evidence:
+HOST18 shutdown groups + HOST13 regression PASS, Debug incremental BUILD PASS
+(47044/68/15136). Tests/build were not rerun on Nov 5. BENCH/Release remain open.
+Next separate block: F003 Flash/UART arbitration, including queued/in-flight
+operations and exclusion of the check/start race. Consultation mode continues.
+
+## Historical Scanner handoff — 2026-11-02
 
 Start with [canonical handoff](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md)
 and the latest section of the [unification plan](../../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).

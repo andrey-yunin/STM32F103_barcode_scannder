@@ -25,6 +25,18 @@ static volatile uint16_t holding_len;
 static volatile bool read_active;
 static volatile bool read_error;
 
+// --- Владение RX при плановом выключении ---
+// После latch RX принимает и отбрасывает прежний обмен до отмены задачей.
+// Накопление ответа STOP разрешит отдельный путь выключения.
+static volatile bool rx_cancelled;
+static volatile bool reset_stop_active;
+
+// --- Boundary of a normal task-owned control/RESEND exchange ---
+// Does not bypass reset latch. Only TxCplt of the last byte opens new data.
+static volatile bool reply_boundary_pending;
+
+static bool ScanUart_StartRxInternal(bool reset_drain);
+
 // --- Независимый сырой захват для диагностических команд ---
 static ScanUartCapture_t capture;
 static volatile bool capture_active;
@@ -80,8 +92,29 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
 	}
 	active_start_sequence = 0U;
 	tx_byte_done = true;
-	if (tx_last_byte)
+	if (tx_last_byte) {
+		// --- Граница ответа STOP до разрешения decoder TX ---
+		// CTS ещё LOW: старые байты отбрасываются, затем разрешается ответ.
+		// По SSI §1-4/1-5 новый ответ предшествует отложенной передаче.
+		if (reset_stop_active && !rx_cancelled) {
+			holding_len = 0U;
+			read_error = huart3.RxState != HAL_UART_STATE_BUSY_RX
+					|| rx_arm_status != HAL_OK;
+			read_active = true;
+		}
+
+		// --- New normal reply starts before decoder TX is permitted ---
+		if (reply_boundary_pending) {
+			holding_len = 0U;
+			if (!rx_cancelled && !AppSafety_IsResetPending()) {
+				read_error |= huart3.RxState != HAL_UART_STATE_BUSY_RX
+						|| rx_arm_status != HAL_OK;
+			}
+			reply_boundary_pending = false;
+		}
+
 		HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_SET);
+	}
 }
 
 // --- Read-only task snapshot; UART callbacks are excluded during copying ---
@@ -122,12 +155,13 @@ static void ScanUart_NotifyRead(void) {
 }
 
 // --- Сохранение ошибки до повторного запуска UART RX ---
-// HAL может остановить приём при ошибке.
 // Продолжающийся приём не перезапускаем.
+// После latch RX нужен для завершения обмена до окончательного CancelRx.
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	if (huart->Instance != USART3)
 		return;
 
+	// --- Диагностика сохраняется независимо от владельца обмена ---
 	rx_diag.error_mask |= huart->ErrorCode;
 
 	if (capture_active)
@@ -140,29 +174,38 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	if (rx_diag.error_count != UINT32_MAX)
 		++rx_diag.error_count;
 
-	if (AppSafety_IsResetPending())
+	// --- Окончательное закрытие запрещает повторный запуск ---
+	if (rx_cancelled)
 		return;
 
-	if (read_active)
+	if (read_active
+			&& (!AppSafety_IsResetPending() || reset_stop_active))
 		read_error = true;
 
+	// --- Восстановление RX для разрешённого завершения обмена ---
 	if (huart->RxState == HAL_UART_STATE_READY)
-		(void) ScanUart_StartRx();
+		(void) ScanUart_StartRxInternal(true);
 
-	ScanUart_NotifyRead();
+	if (!AppSafety_IsResetPending() || reset_stop_active)
+		ScanUart_NotifyRead();
 }
 
 /*
- * Отменяет RX после установки reset-latch.
- * Вызывает задача Scanner; диагностика сохраняется.
- * Latch запрещает повторный запуск из позднего callback.
+ * Окончательно закрывает RX после установки reset-latch.
+ * Вызывает только задача Scanner; диагностика сохраняется.
+ * Запрет фиксируется до HAL AbortReceive, чтобы поздний callback
+ * не восстановил приём во время или после отмены.
  */
 bool ScanUart_CancelRx(void) {
-	// --- Закрытие сырого захвата ---
+	// --- Закрытие владельцев RX до обращения к HAL ---
 	const uint32_t saved_primask = __get_PRIMASK();
 	__disable_irq();
 
 	capture_active = false;
+	rx_cancelled = true;
+	reset_stop_active = false;
+	reply_boundary_pending = false;
+	read_active = false;
 	__DMB();
 
 	__set_PRIMASK(saved_primask);
@@ -171,7 +214,7 @@ bool ScanUart_CancelRx(void) {
 	HAL_StatusTypeDef status = HAL_UART_AbortReceive(&huart3);
 
 	// --- Аннулирование данных отменённого обмена ---
-	// После latch callback эти поля больше не обновляет.
+	// После rx_cancelled callback эти поля больше не обновляет.
 	read_active = false;
 	holding_len = 0U;
 	read_error = false;
@@ -184,6 +227,9 @@ bool ScanUart_CancelRx(void) {
 
 // --- Инициализация приёма; накопление ответа пока закрыто ---
 bool ScanUart_Init(void) {
+	rx_cancelled = false;
+	reset_stop_active = false;
+	reply_boundary_pending = false;
 	read_active = false;
 	read_error = false;
 	holding_len = 0U;
@@ -193,20 +239,21 @@ bool ScanUart_Init(void) {
 
 /*
  * Запускает приём одного байта через UART-прерывание.
- * Вызывается при инициализации и из RX callbacks.
- * Проверка reset-latch и запуск неделимы.
+ * Обычный запуск запрещён после latch; внутренний re-arm
+ * сохраняет приём для завершения обмена.
+ * После CancelRx повторный запуск запрещён обоим путям.
  */
-bool ScanUart_StartRx(void) {
-	// --- Защищённая проверка запрета приёма ---
+static bool ScanUart_StartRxInternal(bool reset_drain) {
+	// --- Неделимая проверка разрешения и запуск RX ---
 	uint32_t irq_state = __get_PRIMASK();
 	__disable_irq();
 
-	if (AppSafety_IsResetPending()) {
+	if (rx_cancelled || (AppSafety_IsResetPending() && !reset_drain)) {
 		__set_PRIMASK(irq_state);
 		return false;
 	}
 
-	// --- Запуск следующего побайтового приёма ---
+	// --- Следующий побайтовый приём ---
 	HAL_StatusTypeDef status = HAL_UART_Receive_IT(&huart3, &rx_byte, 1U);
 
 	rx_arm_status = (uint8_t) status;
@@ -220,31 +267,43 @@ bool ScanUart_StartRx(void) {
 	return status == HAL_OK;
 }
 
+// --- Обычный запуск RX после latch остаётся запрещён ---
+bool ScanUart_StartRx(void) {
+	return ScanUart_StartRxInternal(false);
+}
+
+// --- Допуск обычной передачи либо специального STOP ---
+static bool ScanUart_IsTxAllowed(bool reset_stop) {
+    if (reset_stop)
+        return AppSafety_IsResetPending()
+                && !AppSafety_IsResetPreparationExpired();
+
+    return !AppSafety_IsResetPending();
+}
+
 /*
  * Ожидает уровень RTS в пределах существующего таймаута.
- * Подготовка к reset прекращает ожидание с результатом false.
+ * Обычное ожидание прерывается по latch.
+ * STOP ограничен тем же общим сроком подготовки reset.
  * Атомарный запрет последующей активации обеспечивают вызывающие gates.
  */
-static bool ScanUart_WaitRts(GPIO_PinState level, uint32_t timeout_ms) {
-	// --- Начало существующего срока ожидания ---
-	uint32_t started = HAL_GetTick();
+static bool ScanUart_WaitRts(GPIO_PinState level, uint32_t timeout_ms,
+        bool reset_stop) {
+    // --- Локальный срок сохраняется внутри общего бюджета reset ---
+    const uint32_t started = HAL_GetTick();
 
-	// --- Ожидание уровня с проверкой отмены ---
-	while (HAL_GPIO_ReadPin(RTS_GPIO_Port, RTS_Pin) != level) {
-		if (AppSafety_IsResetPending())
-			return false;
+    while (HAL_GPIO_ReadPin(RTS_GPIO_Port, RTS_Pin) != level) {
+        if (!ScanUart_IsTxAllowed(reset_stop)
+                || (uint32_t) (HAL_GetTick() - started) >= timeout_ms)
+            return false;
 
-		if ((uint32_t) (HAL_GetTick() - started) >= timeout_ms)
-			return false;
+        AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
 
-		AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+        if (osDelay(1U) != osOK)
+            return false;
+    }
 
-		if (osDelay(1U) != osOK)
-			return false;
-	}
-
-	// --- Уровень RTS не означает успех отменённой операции ---
-	return !AppSafety_IsResetPending();
+    return ScanUart_IsTxAllowed(reset_stop);
 }
 
 /*
@@ -316,11 +375,11 @@ static void ScanUart_AbortTx(void) {
 // Последний TxCpltCallback фиксирует завершение START
 // и отпускает CTS после фактического окончания передачи UART.
 static bool ScanUart_SendInternal(const uint8_t *data, uint16_t len,
-bool track_start) {
+bool track_start, bool reset_stop) {
 	if (data == NULL || len == 0U || len > 134U)
 		return false;
 	// The preceding transaction must have released its grant before a new one.
-	if (!ScanUart_WaitRts(GPIO_PIN_SET, 2000U))
+	if (!ScanUart_WaitRts(GPIO_PIN_SET, 2000U, reset_stop))
 		return false;
 
 	// --- Атомарная проверка запрета и запрос передачи ---
@@ -328,7 +387,7 @@ bool track_start) {
 	const uint32_t saved_primask = __get_PRIMASK();
 	__disable_irq();
 
-	if (AppSafety_IsResetPending()) {
+	if (!ScanUart_IsTxAllowed(reset_stop)) {
 		__set_PRIMASK(saved_primask);
 		return false;
 	}
@@ -342,13 +401,14 @@ bool track_start) {
 	bool success = false;
 	for (uint16_t i = 0; i < len; ++i) {
 		// Bound character gaps below the default 200 ms intercharacter timeout.
-		if (!ScanUart_WaitRts(GPIO_PIN_RESET, i == 0U ? 2000U : 100U))
+		if (!ScanUart_WaitRts(GPIO_PIN_RESET, i == 0U ? 2000U : 100U,
+				reset_stop))
 			break;
 		// --- Атомарный запрет запуска следующего UART-байта ---
 		uint32_t irq_state = __get_PRIMASK();
 		__disable_irq();
 
-		if (AppSafety_IsResetPending()) {
+		if (!ScanUart_IsTxAllowed(reset_stop)) {
 			__set_PRIMASK(irq_state);
 			break;
 		}
@@ -389,7 +449,7 @@ bool track_start) {
 		uint32_t started = HAL_GetTick();
 
 		while (!tx_byte_done && (uint32_t) (HAL_GetTick() - started) < 100U) {
-			if (AppSafety_IsResetPending())
+			if (!ScanUart_IsTxAllowed(reset_stop))
 				break;
 
 			AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
@@ -400,7 +460,7 @@ bool track_start) {
 
 		// --- Отмена имеет приоритет над полученным completion ---
 		// Буфер возвращается вызывающему только после остановки TX.
-		if (!tx_byte_done || AppSafety_IsResetPending()) {
+		if (!tx_byte_done || !ScanUart_IsTxAllowed(reset_stop)) {
 			ScanUart_AbortTx();
 			break;
 		}
@@ -410,17 +470,105 @@ bool track_start) {
 	HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_SET);
 	if (!success)
 		return false;
-	return ScanUart_WaitRts(GPIO_PIN_SET, 2000U);
+	return ScanUart_WaitRts(GPIO_PIN_SET, 2000U, reset_stop);
 }
 
 // --- Normal commands never replace the retained START snapshot ---
 bool ScanUart_Send(const uint8_t *data, uint16_t len) {
-	return ScanUart_SendInternal(data, len, false);
+	return ScanUart_SendInternal(data, len, false, false);
+}
+
+/*
+ * A normal synchronous exchange with a boundary at the final UART TC.
+ * Called only by Scanner task for preparation commands or SSI NAK RESEND.
+ * RX remains armed and read errors remain latched while old bytes are drained.
+ * No ordinary byte may be launched after reset latch.
+ */
+bool ScanUart_SendForReply(const uint8_t *data, uint16_t len) {
+	// --- Require the existing read owner and ordinary UART admission ---
+	if (data == NULL || len == 0U || len > 134U)
+		return false;
+
+	const uint32_t saved_primask = __get_PRIMASK();
+	__disable_irq();
+
+	bool ready = !AppSafety_IsResetPending() && !rx_cancelled
+			&& read_active && !read_error
+			&& huart3.RxState == HAL_UART_STATE_BUSY_RX
+			&& rx_arm_status == HAL_OK;
+	if (ready) {
+		holding_len = 0U;
+		reply_boundary_pending = true;
+	}
+	__set_PRIMASK(saved_primask);
+
+	if (!ready)
+		return false;
+
+	// --- Existing TX/abort/CTS handling, with the ordinary reset gate ---
+	bool sent = ScanUart_SendInternal(data, len, false, false);
+
+	const uint32_t cleanup_primask = __get_PRIMASK();
+	__disable_irq();
+	reply_boundary_pending = false;
+	bool clean = !read_error && !rx_cancelled && !AppSafety_IsResetPending();
+	__set_PRIMASK(cleanup_primask);
+	return sent && clean;
 }
 
 // --- Explicit domain hook avoids guessing START from arbitrary UART bytes ---
 bool ScanUart_SendStart(const uint8_t *data, uint16_t len) {
-	return ScanUart_SendInternal(data, len, true);
+	return ScanUart_SendInternal(data, len, true, false);
+}
+
+/*
+ * Единственный task-only TX-путь после latch: только точный SSI STOP.
+ * Пакет формирует домен. Проверка байтов исключает произвольные команды.
+ * AIM/WAKE не используется; CTS LOW будит модуль и запрашивает передачу.
+ */
+bool ScanUart_SendStopForReset(const uint8_t *data, uint16_t len) {
+    static const uint8_t stop_only[] = { 0x04U, 0xE5U, 0x04U, 0x00U,
+            0xFFU, 0x13U };
+
+    // --- Узкий допуск выключения ---
+    if (data == NULL || len != sizeof(stop_only)
+            || memcmp(data, stop_only, sizeof(stop_only)) != 0
+            || !ScanUart_IsTxAllowed(true))
+        return false;
+
+    // --- Отмена накопления прежнего ответа, RX продолжает дренирование ---
+    const uint32_t saved_primask = __get_PRIMASK();
+    __disable_irq();
+
+    if (rx_cancelled || !ScanUart_IsTxAllowed(true)) {
+        __set_PRIMASK(saved_primask);
+        return false;
+    }
+
+    capture_active = false;
+    read_active = false;
+    holding_len = 0U;
+    read_error = false;
+    reset_stop_active = true;
+    reply_boundary_pending = false;
+
+    uint32_t flags = osThreadFlagsClear(FLAG_SCAN_UART_RX);
+    bool ready = (flags & osFlagsError) == 0U;
+
+    if (ready && huart3.RxState == HAL_UART_STATE_READY)
+        ready = ScanUart_StartRxInternal(true);
+
+    ready = ready && huart3.RxState == HAL_UART_STATE_BUSY_RX
+            && rx_arm_status == HAL_OK;
+
+    __set_PRIMASK(saved_primask);
+
+    if (!ready)
+        return false;
+
+    // --- Новый handshake завершает прежнюю передачу и даёт STOP приоритет ---
+    // Накопление ACK откроет TxCpltCallback перед отпусканием CTS.
+    return ScanUart_SendInternal(data, len, false, true);
 }
 
 /*
@@ -502,8 +650,8 @@ const uint8_t* ScanUart_GetReceived(uint16_t *out_len, bool *out_error) {
 }
 
 /*
- * HAL завершил приём одного байта.
  * Callback сохраняет байт и восстанавливает приём; SSI здесь не разбирается.
+ * После latch прежние байты принимаются без передачи обычной операции.
  * При UART error повторный запуск выполняет ErrorCallback, чтобы не очистить
  * ErrorCode до окончания ошибочной ветки HAL_UART_IRQHandler.
  */
@@ -517,11 +665,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	// --- Диагностика фактического приёма сохраняется и после latch ---
 	ScanUart_RecordRx(byte);
 
-	if (AppSafety_IsResetPending())
+	if (rx_cancelled)
 		return;
 
-	// --- Независимый сырой capture, включая повреждённый байт ---
-	if (capture_active) {
+	const bool accepting = !AppSafety_IsResetPending() || reset_stop_active;
+
+	// --- Обычный capture после latch не продолжается ---
+	if (capture_active && !AppSafety_IsResetPending()) {
 		capture.errors |= errors;
 
 		if (capture.length < SCAN_UART_CAPTURE_SIZE)
@@ -530,18 +680,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 			capture.overflow = true;
 	}
 
-	// --- Добавление к непрочитанным данным текущего обмена ---
-	if (read_active) {
-		if (errors != HAL_UART_ERROR_NONE
-				|| holding_len == SCAN_UART_PENDING_SIZE)
+	// --- Накопление только для разрешённого владельцем обмена ---
+	if (read_active && accepting) {
+		if (errors != HAL_UART_ERROR_NONE)
 			read_error = true;
-		else
-			holding_buf[holding_len++] = byte;
+		else if (!reply_boundary_pending) {
+			if (holding_len == SCAN_UART_PENDING_SIZE)
+				read_error = true;
+			else
+				holding_buf[holding_len++] = byte;
+		}
 	}
 
-	// --- Повторный запуск и уведомление задачи ---
+	// --- Приём сохраняется до окончательного CancelRx ---
 	if (errors == HAL_UART_ERROR_NONE)
-		(void) ScanUart_StartRx();
+		(void) ScanUart_StartRxInternal(true);
 
-	ScanUart_NotifyRead();
+	if (accepting)
+		ScanUart_NotifyRead();
 }

@@ -19,4 +19,8 @@ void AppSafety_PrepareReset(void);
 // Проверка и последующая активация требуют общей критической секции.
 bool AppSafety_IsResetPending(void);
 
+// --- Общий срок подготовки F002/F006 ---
+// Три секунды от первого reset-latch; проверка не продлевает срок.
+bool AppSafety_IsResetPreparationExpired(void);
+
 #endif /* INC_APP_SAFETY_H_ */

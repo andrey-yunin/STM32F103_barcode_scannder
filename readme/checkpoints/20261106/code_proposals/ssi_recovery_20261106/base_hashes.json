@@ -1,0 +1,8 @@
+{
+  "App/inc/scan_ssi.h": "94faa2daa943e7a88f5be23ee2341e633c6409db9709b754c3c94b13cb214c1a",
+  "App/src/scan_ssi.c": "8fe144a643f8b0ea95afb889e68497e6cca5e8411fe74c7622ec89f927b95353",
+  "App/inc/scan_uart_driver.h": "89df74c4139b317c6ab252d933bee3f19fb09ef22a9219797ab873ab1901c271",
+  "App/src/scan_uart_driver.c": "c1e44993ccb5a39b851530b11ed2227ceddff41c009fc3d19fa65c4935acdbdf",
+  "App/src/scan_controller.c": "a89355e1342806a14513a712214014788231a714ff9102a87edcb2f3aa8985fc",
+  "App/src/tasks/task_scan_controller.c": "f17087c4e0cbb9a5093ac45f605b118ea38b98857386f771d7e461b6104011ac"
+}

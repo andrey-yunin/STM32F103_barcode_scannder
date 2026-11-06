@@ -39,31 +39,25 @@ static uint16_t Dispatcher_ReadLe16(const uint8_t *data) {
 }
 
 /*
- * Фиксирует latch/safe-state и ждёт подготовки задачи Scanner.
- * Бюджет — одна секунда RTOS; IRQ во время ожидания разрешены.
- * Отказ подготовки терминален, обычное управление не возобновляется.
+ * Фиксирует latch/safe-state и ждёт подтверждённой остановки Scanner.
+ * Единые 3 секунды начинаются в AppSafety_PrepareReset и не продлеваются.
+ * Отказ подготовки терминален; F006 не начинает Flash до подтверждения.
  */
 static void Dispatcher_PrepareReset(void) {
-	// --- Начало общего срока подготовки ---
-	const uint32_t timeout_ticks = osKernelGetTickFreq();
-	const uint32_t started = osKernelGetTickCount();
-
+	// --- Немедленный запрет и начало общего срока ---
 	AppSafety_PrepareReset();
 
-	// --- Ограниченное ожидание подтверждения домена ---
+	// --- Ожидание подтверждения домена в пределах того же срока ---
 	for (;;) {
-		if ((uint32_t) (osKernelGetTickCount() - started) >= timeout_ticks) {
+		if (AppSafety_IsResetPreparationExpired())
 			Error_Handler();
-		}
 
 		if (ScanTask_IsResetPrepared())
 			return;
 
-		if (osDelay(1U) != osOK) {
+		if (osDelay(1U) != osOK)
 			Error_Handler();
-		}
 
-		// Подтверждает успешный проход ожидания Dispatcher.
 		AppWatchdog_Heartbeat(APP_WDG_CLIENT_DISPATCHER);
 	}
 }
@@ -320,7 +314,11 @@ void app_start_task_dispatcher(void *argument) {
 						| ((uint16_t) parsed.data[0] << 8);
 			}
 
+			// --- Учёт начинается до enqueue и сохраняется после dequeue ---
+			ScanTask_ReserveCommand();
 			if (osMessageQueuePut(scan_queueHandle, &scan_cmd, 0, 0) != osOK) {
+				// Отказ очереди оставляет владение у Dispatcher.
+				ScanTask_ReleaseCommand();
 				CAN_Diagnostics_RecordAppQueueOverflow();
 				CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_DEVICE_BUSY);
 			}
@@ -368,6 +366,14 @@ void app_start_task_dispatcher(void *argument) {
 		}
 
 		case CAN_CMD_SRV_FLASH_COMMIT: {
+			// --- Занятый домен не прерываем и не ждём ради Commit ---
+			// Dispatcher — единственный producer scan_queue; после нулевого
+			// снимка новая операция не появится до завершения этого handler.
+			if (ScanTask_IsFlashCommitBusy()) {
+				CAN_SendNackPublic(parsed.cmd_code, CAN_ERR_DEVICE_BUSY);
+				break;
+			}
+
 			// --- COMMIT: сохранение RAM-конфигурации в Flash ---
 			if (AppConfig_Commit()) {
 				CAN_SendDone(parsed.cmd_code, 0);

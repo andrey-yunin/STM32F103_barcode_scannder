@@ -11,6 +11,11 @@
 // --- Постоянный запрет активации до перезапуска MCU ---
 static volatile bool app_safety_reset_pending = false;
 
+// --- Единый срок подготовки планового reset ---
+// HAL tick используется и в UART; ожиданий и зависимости от RTOS здесь нет.
+static uint32_t app_safety_reset_started;
+#define APP_RESET_PREPARE_TIMEOUT_MS 3000U
+
 /*
  * Отпускает управляющие входы сканера и выключает индикацию платы.
  * Допускает вызов до MX_GPIO_Init(), из startup и аварийных обработчиков.
@@ -56,14 +61,29 @@ bool AppSafety_IsResetPending(void) {
 
 // --- Атомарная фиксация запрета и аппаратный safe-state ---
 // Без Flash, CAN и ожиданий RTOS. Состояние IRQ вызывающего сохраняется.
-// Отмену UART после latch выполняет задача Scanner через Scan_SyncResetState.
+// STOP и окончательное закрытие UART после latch выполняет задача Scanner.
 void AppSafety_PrepareReset(void) {
 	const uint32_t saved_primask = __get_PRIMASK();
 	__disable_irq();
 
+	// --- Начало общего срока только при первом запросе ---
+	// Повторный вызов не продлевает уже начавшуюся подготовку.
+	if (!app_safety_reset_pending)
+		app_safety_reset_started = HAL_GetTick();
+
+	// --- Необратимый запрет активации и безопасные уровни GPIO ---
 	app_safety_reset_pending = true;
 	AppSafety_AllOff();
 	__DSB();
 
 	__set_PRIMASK(saved_primask);
+}
+
+// --- Проверка общего срока подготовки ---
+// Только чтение, без ожиданий.
+// Вычитание unsigned сохраняет проверку при переполнении HAL tick.
+bool AppSafety_IsResetPreparationExpired(void) {
+	return app_safety_reset_pending
+			&& (uint32_t) (HAL_GetTick() - app_safety_reset_started)
+						>= APP_RESET_PREPARE_TIMEOUT_MS;
 }

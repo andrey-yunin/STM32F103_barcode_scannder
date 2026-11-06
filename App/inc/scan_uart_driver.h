@@ -50,6 +50,12 @@ bool ScanUart_Wake(void);
 // CTS is released on every exit; false includes handshake/transport failure.
 bool ScanUart_Send(const uint8_t *data, uint16_t len);
 
+// --- Normal task-owned exchange with a fresh RX boundary ---
+// BeginRead must already own RX. Old incoming bytes are drained until the
+// final transmitted byte completes, before CTS is released for the new reply.
+// RX errors remain latched; reset gates are identical to ordinary Send.
+bool ScanUart_SendForReply(const uint8_t *data, uint16_t len);
+
 // --- START_DECODE evidence is retained independently of later STOP/ENABLE ---
 #define SCAN_UART_TX_CAPTURE_SIZE 16U
 typedef struct {
@@ -59,6 +65,12 @@ typedef struct {
 } ScanUartTxDiagnostics_t;
 // Tracks the actual HAL call, not merely generation of a command buffer.
 bool ScanUart_SendStart(const uint8_t *data, uint16_t len);
+
+// --- Task-only STOP после latch, без AIM/WAKE ---
+// Принимает только точный шестибайтовый SSI STOP; D502 не меняется.
+// true означает завершение TX/handshake; ACK ещё должна проверить задача.
+bool ScanUart_SendStopForReset(const uint8_t *data, uint16_t len);
+
 // Task-only coherent copy; no new UART transmission or state reset.
 void ScanUart_GetTxDiagnostics(ScanUartTxDiagnostics_t *out);
 
