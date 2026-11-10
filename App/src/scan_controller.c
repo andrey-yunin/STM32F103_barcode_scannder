@@ -50,8 +50,8 @@ bool ScanCtrl_ProcessReceived(const uint8_t *data, uint16_t len) {
 	}
 
 	if (msg.opcode == SSI_OP_DECODE_DATA) {
-		// --- Обязательный байт типа штрихкода ---
-		if (msg.data_len < 1U) {
+		// --- Тип штрихкода и хотя бы один байт данных обязательны ---
+		if (msg.data_len < 2U) {
 			g_stats.ssi_decode_errors++;
 			g_state = SCAN_STATE_ERROR;
 			return false;

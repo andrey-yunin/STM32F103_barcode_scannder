@@ -175,52 +175,117 @@ static bool Scan_TryAcceptTerminalResult(void) {
 	return accepted;
 }
 
-// --- Проверка DECODE_DATA без сохранения результата и изменения статистики ---
-static bool Scan_IsValidDecodeData(const uint8_t *data, uint16_t len) {
-	SsiMsg_t message;
+// --- Результат потребления байтов независимо от границ RX-прерываний ---
+typedef enum {
+	SCAN_RX_MORE,
+	SCAN_RX_PACKET,
+	SCAN_RX_BAD_LENGTH
+} ScanRxStep_t;
 
-	return Ssi_Decode(data, len, &message)
-			&& message.opcode == SSI_OP_DECODE_DATA && message.data_len >= 1U;
+// --- Завершённый пакет выбирает действие задачи, а не итог CAN ---
+typedef enum {
+	SCAN_PACKET_ACK,
+	SCAN_PACKET_NAK,
+	SCAN_PACKET_BARCODE,
+	SCAN_PACKET_REVISION,
+	SCAN_PACKET_RESEND,
+	SCAN_PACKET_INVALID
+} ScanPacketKind_t;
+
+// --- Типизированный итог одного чтения 0601 ---
+// Заменяет независимые bool-флаги. Приоритет задаётся явно:
+// TRANSPORT > HARDWARE > CHECKSUM_ONLY > TIMEOUT; OK — получен штрихкод.
+typedef enum {
+	SCAN_READ_TIMEOUT = 0,
+	SCAN_READ_CHECKSUM_ONLY,
+	SCAN_READ_HARDWARE_ERROR,
+	SCAN_READ_TRANSPORT_ERROR,
+	SCAN_READ_OK
+} ScanReadOutcome_t;
+
+/*
+ * Потребляет не более одного полного пакета. Вызывающий сохраняет cursor
+ * внутри своего RX-снимка, обрабатывает пакет, очищает packet_len и
+ * продолжает с тем же снимком. Это сохраняет пакеты после повреждённого.
+ * Length вне поддерживаемого обрамления — ошибка, а не разрешение искать
+ * произвольные байты payload в поисках возможного заголовка F3.
+ */
+static ScanRxStep_t Scan_CollectPacket(const uint8_t *data, uint16_t len,
+		uint16_t *cursor, uint8_t *packet, uint16_t *packet_len) {
+	// --- Сборка продолжается через границы RX-снимков ---
+	while (*cursor < len) {
+		if (*packet_len >= SSI_PACKET_MAX_LEN)
+			return SCAN_RX_BAD_LENGTH;
+
+		packet[(*packet_len)++] = data[(*cursor)++];
+
+		if (packet[0] < 4U || packet[0] > 4U + SSI_MAX_PAYLOAD)
+			return SCAN_RX_BAD_LENGTH;
+
+		if (*packet_len == (uint16_t) packet[0] + 2U)
+			return SCAN_RX_PACKET;
+	}
+
+	return SCAN_RX_MORE;
 }
 
 /*
- * Задача собирает SSI-пакет по Length, независимо от границ RX-событий.
- * Полный валидный ACK пропускается; следующий пакет собирается далее.
- * Повреждённый пакет передаётся существующей обработке ошибок.
+ * Вызывается только для полного пакета поддерживаемой длины из сборщика.
+ * Ошибка checksum запрашивает SSI RESEND; это не решение CAN NACK.
+ * Валидные ACK/NAK отдаются владельцу обмена без ответа на них.
+ * Сегментированные или недопустимые ожидаемые данные не являются
+ * успешным одиночным штрихкодом.
  */
-static bool Scan_CollectPacket(const uint8_t *data, uint16_t len,
-		uint8_t *packet, uint16_t *packet_len) {
-	for (uint16_t i = 0U; i < len; ++i) {
-		packet[(*packet_len)++] = data[i];
+static ScanPacketKind_t Scan_ClassifyPacket(const uint8_t *packet,
+		uint16_t packet_len, SsiMsg_t *message) {
+	// --- Обрамление проверяет сборщик; остаточная ошибка декодирования — checksum ---
+	if (!Ssi_Decode(packet, packet_len, message))
+		return SCAN_PACKET_RESEND;
 
-		// --- Некорректная длина обрабатывается как ошибка SSI ---
-		if (packet[0] < 4U || packet[0] > 4U + SSI_MAX_PAYLOAD)
-			return true;
+	// --- Отправитель входящих пакетов — модуль сканера ---
+	if (message->msg_src != SSI_MSG_SRC_DECODER)
+		return SCAN_PACKET_INVALID;
 
-		// Length включает заголовок и данные, но не checksum.
-		uint16_t expected = (uint16_t) packet[0] + 2U;
+	// --- Фрагменты ревизии вне активной операции со штрихкодом ---
+	// Их отбрасывание не требует сборки текста ревизии.
+	if (message->opcode == SSI_OP_REPLY_REVISION)
+		return (message->status & (uint8_t) ~0x03U) == 0U ?
+				SCAN_PACKET_REVISION : SCAN_PACKET_INVALID;
 
-		if (*packet_len < expected)
-			continue;
+	// --- Одиночные ACK, NAK и штрихкод используют только бит retransmit ---
+	// Сборка многопакетного штрихкода этим фрагментом не заявляется.
+	if ((message->status & (uint8_t) ~0x01U) != 0U)
+		return SCAN_PACKET_INVALID;
 
-		// --- Полный ACK не завершает ожидание штрихкода ---
-		SsiMsg_t message;
-
-		if (Ssi_Decode(packet, *packet_len,
-				&message) && message.opcode == SSI_OP_CMD_ACK) {
-			*packet_len = 0U;
-			continue;
-		}
-
-		return true;
+	switch (message->opcode) {
+	case SSI_OP_CMD_ACK:
+		return message->data_len == 0U ?
+				SCAN_PACKET_ACK : SCAN_PACKET_INVALID;
+	case SSI_OP_CMD_NAK:
+		return message->data_len == 1U ?
+				SCAN_PACKET_NAK : SCAN_PACKET_INVALID;
+	case SSI_OP_DECODE_DATA:
+		// Тип плюс хотя бы один байт данных штрихкода.
+		return message->data_len >= 2U ?
+				SCAN_PACKET_BARCODE : SCAN_PACKET_INVALID;
+	default:
+		break;
 	}
 
-	return false;
+	return SCAN_PACKET_INVALID;
 }
 
 // --- SSI host response limit: project policy matches the existing 2 s RTS bound ---
 // This is a software limit, not readback of the module's current parameter.
 #define SCAN_SSI_RESPONSE_TIMEOUT_MS 2000U
+
+// --- Окно и период опроса capture 0603/0604 ---
+// Окно 3000 мс покрывает штатный SSI-ответ 2000 мс с запасом на передачу
+// и обработку. Период 50 мс (20 Гц) ограничивает задержку реакции на reset
+// и публикует heartbeat заметно чаще idle-таймаута watchdog 500 мс.
+// Это локальные параметры задачи Scanner, а не общий контракт экосистемы.
+#define SCAN_CAPTURE_WINDOW_MS 3000U
+#define SCAN_CAPTURE_POLL_MS   50U
 
 // --- At most three transmissions of the same explicitly rejected host packet ---
 // Host retry limit is a proposed Scanner adaptation. The SSI guide separately
@@ -356,10 +421,19 @@ static void ScanQueryRevision(uint16_t command) {
 		return;
 	}
 
-	// Capture retains raw RX, including malformed and fragmented responses.
-	// Fixed 3 s covers the default 2 s SSI response timeout with margin.
+	// --- Окно capture 0603/0604 и период опроса ---
+	// Владелец: task_scan_controller. Окно задаёт, сколько задача ждёт сырой
+	// ответ на REQUEST_REVISION/BEEP; оно не меняет SSI-таймаут модуля и не
+	// перезапускается. Период задаёт частоту проверки reset и heartbeat.
+	uint32_t tick_freq = osKernelGetTickFreq();
 	uint32_t started = osKernelGetTickCount();
-	uint32_t duration = 3U * osKernelGetTickFreq();
+
+	// +999 — округление вверх до целого тика: окно и период не короче заданных.
+	uint32_t duration =
+			(SCAN_CAPTURE_WINDOW_MS * tick_freq + 999U) / 1000U;
+	uint32_t poll_ticks =
+			(SCAN_CAPTURE_POLL_MS * tick_freq + 999U) / 1000U;
+
 	// --- Ожидание capture с проверкой отмены ---
 	while ((uint32_t) (osKernelGetTickCount() - started) < duration) {
 		if (Scan_SyncResetState()) {
@@ -368,7 +442,13 @@ static void ScanQueryRevision(uint16_t command) {
 		}
 
 		AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
-		osDelay((osKernelGetTickFreq() + 19U) / 20U);
+
+		// --- Ошибка RTOS-ожидания не является прогрессом capture ---
+		// При отказе osDelay задача не может гарантировать периодичность
+		// heartbeat и реакцию на reset; по политике §2.7.1 — терминальный
+		// Error_Handler, а не продолжение capture.
+		if (osDelay(poll_ticks) != osOK)
+			Error_Handler();
 	}
 
 	// --- Проверка отмены после последнего ожидания ---
@@ -560,15 +640,16 @@ void app_start_task_scan_controller(void *argument) {
 		uint32_t slice_ticks = (500U * tick_freq) / 1000U;
 		uint32_t started = osKernelGetTickCount();
 
-		bool rx_received = false;
-		bool wait_error = false;
+		ScanReadOutcome_t outcome = SCAN_READ_TIMEOUT;
+		bool start_acked = false;
+		uint32_t start_resends = 0U;
 
 		// --- Накопитель одного SSI-пакета принадлежит задаче Scanner ---
 		static uint8_t rx_packet[SSI_PACKET_MAX_LEN];
 		uint16_t rx_len = 0U;
 		const uint8_t *rx_data = NULL;
 
-		// --- Приём пакета в пределах исходного срока запроса ---
+		// --- Восстановление SSI в пределах исходного срока запроса ---
 		// Сначала забираем накопленные байты, затем при необходимости ждём.
 		// Число уведомлений не определяет количество доступных данных.
 		for (;;) {
@@ -581,37 +662,133 @@ void app_start_task_scan_controller(void *argument) {
 			if (elapsed >= timeout_ticks)
 				break;
 
-			// --- Потребление накопленных байтов ---
 			uint16_t received_len;
 			bool receive_error;
-
 			const uint8_t *received = ScanUart_GetReceived(&received_len,
 					&receive_error);
 
 			if (receive_error) {
-				wait_error = true;
+				outcome = SCAN_READ_TRANSPORT_ERROR;
 				break;
 			}
 
 			if (received != NULL) {
+				// --- Пакеты внутри одного снимка обрабатываются по курсору ---
+				uint16_t cursor = 0U;
+
+				while (cursor < received_len) {
+					if (AppSafety_IsResetPending()
+							|| (uint32_t) (osKernelGetTickCount() - started)
+									>= timeout_ticks)
+						break;
+
+					ScanRxStep_t step = Scan_CollectPacket(received,
+							received_len, &cursor, rx_packet, &rx_len);
+
+					if (step == SCAN_RX_BAD_LENGTH) {
+						outcome = SCAN_READ_TRANSPORT_ERROR;
+						break;
+					}
+
+					if (step == SCAN_RX_MORE)
+						break;
+
+					SsiMsg_t message;
+					ScanPacketKind_t kind = Scan_ClassifyPacket(rx_packet,
+							rx_len, &message);
+
+					if (kind == SCAN_PACKET_BARCODE) {
+						rx_data = rx_packet;
+						outcome = SCAN_READ_OK;
+						break;
+					}
+
+					// --- Каждый обработанный не-штрихкод освобождает сборщик ---
+					rx_len = 0U;
+
+					switch (kind) {
+					case SCAN_PACKET_ACK:
+						// ACK на START не завершает ожидание штрихкода.
+						start_acked = true;
+						break;
+					case SCAN_PACKET_REVISION:
+						// Посторонний ответ на другую команду — не результат чтения.
+						break;
+					case SCAN_PACKET_RESEND: {
+						// --- Полный пакет с ошибкой checksum: запрос повтора ---
+						outcome = SCAN_READ_CHECKSUM_ONLY;
+						const uint8_t cause = SSI_NAK_RESEND;
+
+						ssi_len = Ssi_Encode(SSI_OP_CMD_NAK, &cause, 1U,
+								ssi_packet);
+
+						if (!ScanUart_Wake()
+								|| !ScanUart_SendForReply(ssi_packet,
+										ssi_len)) {
+							outcome = SCAN_READ_TRANSPORT_ERROR;
+							break;
+						}
+						break;
+					}
+					case SCAN_PACKET_NAK: {
+						if (message.data[0] == SSI_NAK_RESEND) {
+							// Повтор только для START, отклонённого до ACK:
+							// поздний NAK не должен перезапускать принятое декодирование.
+							if (start_acked
+									|| start_resends >= SCAN_SSI_HOST_RESENDS) {
+								outcome = SCAN_READ_TRANSPORT_ERROR;
+								break;
+							}
+							++start_resends;
+							ssi_len = Ssi_EncodeWithStatus(SSI_OP_START_DECODE,
+									SSI_STATUS_RETRANSMIT, NULL, 0U,
+									ssi_packet);
+
+							if (!ScanUart_Wake()
+									|| !ScanUart_SendStart(ssi_packet,
+											ssi_len)) {
+								outcome = SCAN_READ_TRANSPORT_ERROR;
+								break;
+							}
+						} else {
+							outcome = SCAN_READ_HARDWARE_ERROR;
+							break;
+						}
+						break;
+					}
+					default:
+						outcome = SCAN_READ_HARDWARE_ERROR;
+						break;
+					}
+
+					if (outcome == SCAN_READ_HARDWARE_ERROR
+							|| outcome == SCAN_READ_TRANSPORT_ERROR)
+						break;
+
+					AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
+				}
+
+				if (outcome == SCAN_READ_OK
+						|| outcome == SCAN_READ_HARDWARE_ERROR
+						|| outcome == SCAN_READ_TRANSPORT_ERROR)
+					break;
+
 				AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
-
-				if (!Scan_CollectPacket(received, received_len, rx_packet,
-						&rx_len))
-					continue;
-
-				rx_data = rx_packet;
-				rx_received = true;
-				break;
+				continue;
 			}
 
 			// --- Ожидание следующих данных без перезапуска срока ---
+			elapsed = osKernelGetTickCount() - started;
+
+			if (elapsed >= timeout_ticks)
+				break;
+
 			uint32_t remaining = timeout_ticks - elapsed;
 			uint32_t wait_ticks =
 					remaining < slice_ticks ? remaining : slice_ticks;
 
-			uint32_t flags = osThreadFlagsWait(
-			FLAG_SCAN_UART_RX, osFlagsWaitAny, wait_ticks);
+			uint32_t flags = osThreadFlagsWait(FLAG_SCAN_UART_RX,
+					osFlagsWaitAny, wait_ticks);
 
 			if (flags == osFlagsErrorTimeout) {
 				AppWatchdog_Heartbeat(APP_WDG_CLIENT_SCAN);
@@ -619,7 +796,7 @@ void app_start_task_scan_controller(void *argument) {
 			}
 
 			if ((flags & osFlagsError) != 0U) {
-				wait_error = true;
+				outcome = SCAN_READ_TRANSPORT_ERROR;
 				break;
 			}
 
@@ -627,19 +804,17 @@ void app_start_task_scan_controller(void *argument) {
 		}
 
 		// --- Подтверждение штрихкода сканеру до принятия результата и отправки CAN ---
-		bool ack_error = false;
-
-		if (rx_received && !wait_error
-				&& Scan_IsValidDecodeData(rx_data, rx_len)) {
+		if (outcome == SCAN_READ_OK) {
 			ssi_len = Ssi_Encode(SSI_OP_CMD_ACK, NULL, 0, ssi_packet);
-			ack_error = !ScanUart_Wake() || !ScanUart_Send(ssi_packet, ssi_len);
+			if (!ScanUart_Wake() || !ScanUart_Send(ssi_packet, ssi_len))
+				outcome = SCAN_READ_TRANSPORT_ERROR;
 		}
 
 		// --- Закрытие накопления и итоговая проверка RX ---
 		// EndRead атомарно сохраняет итог ошибки и закрывает накопление.
 		// Данные результата уже находятся в rx_packet задачи.
 		if (!ScanUart_EndRead())
-			wait_error = true;
+			outcome = SCAN_READ_TRANSPORT_ERROR;
 
 		// --- Reset имеет приоритет над RX, timeout и ошибкой ожидания ---
 		if (Scan_SyncResetState()) {
@@ -655,16 +830,11 @@ void app_start_task_scan_controller(void *argument) {
 			continue;
 		}
 
-		// --- Раздельные исходы ошибки ожидания и отсутствия ответа ---
-		if (wait_error || ack_error) {
-			ScanCtrl_HandleTransportError();
-			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_COMM);
-		} else if (!rx_received) {
-			ScanCtrl_HandleTimeout();
-			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_TIMEOUT);
-		} else {
-
-			if (rx_data != NULL && ScanCtrl_ProcessReceived(rx_data, rx_len)) {
+		// --- Типизированный итог чтения и terminal-ответ ---
+		switch (outcome) {
+		case SCAN_READ_OK:
+			if (rx_data != NULL
+					&& ScanCtrl_ProcessReceived(rx_data, rx_len)) {
 				uint8_t buf[SHADOW_BUF_SIZE];
 				uint8_t buf_len = 0;
 
@@ -672,8 +842,25 @@ void app_start_task_scan_controller(void *argument) {
 				CAN_SendDataFragmented(cmd.cmd_code, buf, buf_len);
 				CAN_SendDone(cmd.cmd_code, 0);
 			} else {
+				// --- Терминальный отказ также завершает операцию контроллера ---
+				ScanCtrl_HandleTransportError();
 				CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_HARDWARE);
 			}
+			break;
+		case SCAN_READ_TRANSPORT_ERROR:
+		case SCAN_READ_CHECKSUM_ONLY:
+			ScanCtrl_HandleTransportError();
+			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_COMM);
+			break;
+		case SCAN_READ_HARDWARE_ERROR:
+			ScanCtrl_HandleTransportError();
+			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_HARDWARE);
+			break;
+		case SCAN_READ_TIMEOUT:
+		default:
+			ScanCtrl_HandleTimeout();
+			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_TIMEOUT);
+			break;
 		}
 
 		// --- Прекращение попытки после неуспешного чтения ---

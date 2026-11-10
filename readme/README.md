@@ -56,22 +56,28 @@ CAN protocol documentation:
 ```
 
 
-## Current Scanner handoff — 2026-11-06
+## Current Scanner handoff — 2026-11-10
 
 Start with the [canonical handoff](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md)
 and [checkpoint/20261106](checkpoints/20261106/README.md).
-Installed over ea1eacb: reset STOP/ACK with shared3s, F003 startup/queued/
-in-flight guard, SSI status codec, normal UART RX reply boundary and confirmed
-STOP/FLUSH before each new START. Latest HOST preparation20 scenarios/36commands
-and shutdown18 groups PASS; Debug incremental BUILD PASS (48740/72/15136),
-also confirmed by the user. Release/BENCH remain open.
+Installed over 0cf2189 and committed on 2026-11-10: barcode SSI receive/recovery
+loop (cursor packet assembly across RX snapshots, ACK/NAK/REVISION handling,
+SSI NAK RESEND, limited START retransmission before ACK), nonempty barcode
+validation in controller, U21-C capture checks and typed read outcome with
+E601/E602/E603 priority preserved. Earlier blocks remain: reset STOP/ACK with
+shared3s, F003 startup/queued/in-flight guard, SSI status codec, normal UART RX
+reply boundary and confirmed STOP/FLUSH before each new START.
 
-Next: barcode SSI recovery loop and nonempty barcode validation in controller.
-These changes are NOT installed. The earlier full candidate must be compared
-with the current tree; its20 steps already contain installed components.
-External operation timeout/Studio window integration remains OPEN.
-Current state is saved in a normal commit over ea1eacb at the user's request;
-use git log -1 for its hash. No push or hardware actions were requested.
+Verified: HOST SSI codec and controller PASS; Debug incremental BUILD PASS
+(49380/72/15136, 0 errors/0 warnings). HOST task-loop, Release and BENCH are
+NOT RUN. Actual FLUSH/EE=1/ACK-NAK/module settings remain unverified.
+Remaining U21/U22: common transaction deadline, full RX-event ownership and
+fragment assembly, multipacket conditional. STOP/terminal is DECIDED: success
+sends no STOP; ordinary error sends the CAN terminal then the trailing STOP;
+there is no STOP ACK wait and reset remains a separate STOP-only path.
+The common deadline has no HC/Thermo/Fluidics reference and needs an explicit
+policy decision. External operation timeout/Studio window integration remains
+OPEN. Use git log -1 for the commit hash. No push or hardware actions.
 
 ## Historical Scanner handoff — verified 2026-11-05
 

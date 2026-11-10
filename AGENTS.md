@@ -22,28 +22,65 @@ because it builds. Preserve user changes and historical documentation.
 
 Current plan:
 [Scanner unification plan](../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).
-Current handoff: 2026-11-06, canonical Scanner/NEXT_SESSION_PROMPT.md and
-readme/checkpoints/20261106/. Commit parent ea1eacb; use git log -1 for the
-resulting snapshot commit. Installed: reset STOP/ACK/RX-close with shared3s,
-F003 startup/queued/in-flight guard, SSI status codec, normal SendForReply RX
-boundary, and task STOP/ACK -> FLUSH_QUEUE/ACK preparation before START.
-Preparation uses a2000ms reply limit and up to2 resends of the same STOP/FLUSH
-only after explicit SSI RESEND. No retry on silence. New START is forbidden
-after failed preparation. No ordinary STOP after successful barcode result.
-Latest installed HOST:20 preparation scenarios/36 commands plus18 shutdown
-groups PASS; Debug incremental BUILD PASS (48740/72/15136), user confirmed.
-Release/BENCH NOT RUN. Actual FLUSH/EE=1/ACK-NAK/module settings unverified.
-NEXT: wire the agreed barcode receive/recovery loop and reject empty barcode
-in controller. Those changes are NOT installed; U21-A/B/C remain as documented.
-Full ssi_recovery_20261106 candidate is preparation, not installed CODE. Its
-old20-step instructions cannot be replayed over already-installed components;
-rebase only remaining receive/controller blocks, preserving reset/F003/prep.
-No new START after its ACK; local retransmission is not a new CAN operation.
-Preparation adds time before START; Studio timeout+7 integration remains OPEN.
-No broad TX deadline, Studio changes or hardware actions are authorized.
-The user's current request authorizes this checkpoint/commit only. Prior
-specific firmware permissions do not authorize the next block automatically.
-Consultation, exact source comparison and manual code workflow remain in force.
+The plan title defines the local task: **Scanner — audit and unification of
+common layers**, not a single defect. Target board: Scanner (NodeID 0x60,
+family 60..6F). Reference boards and pinned sources:
+HC `6abc1d2706acac36d842594e6331de180c2241ea`,
+Thermo `c43368ec5509f2693caed8797d370047af0af346`,
+Fluidics `ac1aa2b12b3d270d98f080a8b0bdbe5e4ad9ca49`.
+
+Common-vs-specific rule (EXECUTOR_COMMON_LAYERS_GUIDE.md and
+DDS-240_ECOSYSTEM_STANDARD.md:550,683,696-709): common layers (HAL/IRQ,
+CAN transport, Dispatcher/service, config/Flash, safety/watchdog, RTOS/build)
+must keep the same contract and behavior as the accepted reference; only
+documented hardware/resource adaptations are allowed. Domain specifics
+(Scanner SSI/Zebra, UART handshake, STOP/FLUSH preparation, barcode recovery,
+E600-E603 mapping, 0601/0602/0603/0604) stay at the mapping/translation/
+response-policy boundary: use the closest functional analog or own
+implementation, and never create a bypass protocol or change the common
+transaction lifecycle. "Same" means same contract/behavior, not byte-identical
+code; layout, defaults and safe-state remain board-specific.
+
+Current state (2026-11-10): barcode receive/recovery loop and empty-barcode
+rejection are installed and committed in
+App/src/tasks/task_scan_controller.c and App/src/scan_controller.c
+(commit of 2026-11-10 over 0cf2189; see git log -1).
+U21-A/B addressed; U21-C CODE+BUILD (checked osDelay -> Error_Handler,
+SCAN_CAPTURE_WINDOW_MS/POLL_MS); typed outcome CODE+BUILD (ScanReadOutcome_t,
+terminal switch preserves E601/E602/E603 priority). Debug incremental BUILD
+PASS (49380/72/15136, 0 errors/0 warnings), ELF SHA256
+bbe6687d4f5a990b1041ffad2f93cce4834e05cb2b31cad2cc8906a38b9b0bfc.
+HOST SSI codec and controller PASS; HOST task-loop NOT RUN.
+Release/BENCH NOT RUN; actual FLUSH/EE=1/ACK-NAK/module settings unverified.
+Remaining U21/U22: common transaction deadline, full RX-event ownership/
+fragment assembly, multipacket conditional. STOP/terminal is DECIDED by
+SCANNER_EXECUTOR_REPORT.md:2734-2735/2075: success sends no STOP; ordinary
+error sends CAN terminal then the existing trailing STOP; no STOP ACK wait;
+no reorder; reset remains a separate STOP-only path.
+This block is closed in report/plan/NEXT/README and committed with explicit
+permission. Next: continue the U-matrix (common deadline / RX ownership, not
+STOP). The common preparation+START+read deadline has no reference precedent
+in HC/Thermo/Fluidics and requires an explicit user policy decision first. No new START after its ACK;
+local retransmission is not a new CAN operation. Preparation adds time before
+START; Studio timeout+7 integration remains OPEN. No broad TX deadline, Studio
+changes or hardware actions are authorized. Consultation, exact source
+comparison and manual code workflow remain in force.
+
+## Industrial baseline — стабильное правило
+- HC/Thermo/Fluidics — фактический промышленный baseline проекта.
+  Их P0-статус не сертифицируется и не пересматривается в рамках Scanner.
+  Не заявлять «эталоны P0» или «эталоны не P0» без полного аудита.
+- Scanner сравнивается только с фактической реализацией эталонов
+  и своими SSI/Zebra-требованиями.
+- Кандидатные патчи `readme/checkpoints/.../code_proposals/` —
+  подготовка, не эталон и не требование.
+- Пункт P0 для Scanner — только если тот же механизм есть в промышленной
+  реализации эталона или прямо требуется `DDS-240_ECOSYSTEM_STANDARD.md`
+  / `DDS240-ACCEPT-1`.
+- Объективные факты без P0-фрейминга: Release не собран; блоки плана
+  A/B/D/E/F не закрыты. Остальное — дельта после сравнения, не новое требование.
+- Новая сессия, найдя кандидатный патч, не превращает его в требование:
+  сначала ищет эталонную реализацию или нормативный источник.
 
 Historical handoff (superseded by Nov 6): verified 2026-11-05;
 see canonical Scanner/NEXT_SESSION_PROMPT.md

@@ -4,6 +4,11 @@
 Scanner обычным коммитом поверх `ea1eacb`. Итоговый hash — коммит, содержащий
 этот каталог; см. `git log -1 --oneline`. Историю Git не переписывать.
 
+> 09-10.11.2026: recovery/empty-barcode, U21-C и типизированный итог чтения
+> установлены и закоммичены 10.11.2026 (см. `git log -1`). Debug PASS 49380/72/15136,
+> 0errors/0warnings; HOST codec/controller PASS; HOST task-loop NOT RUN;
+> BENCH/Release NOT RUN. Текст ниже — исторический снимок 06.11.
+
 Точка входа: [NEXT_SESSION_PROMPT.md](NEXT_SESSION_PROMPT.md). Основные документы
 продолжают находиться в общей директории
 `DDS-240_readme/DDS-240_eko_system/Scanner/` вне репозитория Scanner.
