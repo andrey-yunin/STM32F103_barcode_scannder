@@ -55,6 +55,7 @@ bool ScanUart_Send(const uint8_t *data, uint16_t len);
 // final transmitted byte completes, before CTS is released for the new reply.
 // RX errors remain latched; reset gates are identical to ordinary Send.
 bool ScanUart_SendForReply(const uint8_t *data, uint16_t len);
+bool ScanUart_SendForReplyDeadline(const uint8_t *data, uint16_t len, uint32_t deadline_ms);
 
 // --- START_DECODE evidence is retained independently of later STOP/ENABLE ---
 #define SCAN_UART_TX_CAPTURE_SIZE 16U
@@ -65,6 +66,7 @@ typedef struct {
 } ScanUartTxDiagnostics_t;
 // Tracks the actual HAL call, not merely generation of a command buffer.
 bool ScanUart_SendStart(const uint8_t *data, uint16_t len);
+bool ScanUart_SendStartDeadline(const uint8_t *data, uint16_t len, uint32_t deadline_ms);
 
 // --- Task-only STOP после latch, без AIM/WAKE ---
 // Принимает только точный шестибайтовый SSI STOP; D502 не меняется.

@@ -278,6 +278,7 @@ static ScanPacketKind_t Scan_ClassifyPacket(const uint8_t *packet,
 // --- SSI host response limit: project policy matches the existing 2 s RTS bound ---
 // This is a software limit, not readback of the module's current parameter.
 #define SCAN_SSI_RESPONSE_TIMEOUT_MS 2000U
+#define SCAN_SSI_PREP_BUDGET_MS 6000U
 
 // --- Окно и период опроса capture 0603/0604 ---
 // Окно 3000 мс покрывает штатный SSI-ответ 2000 мс с запасом на передачу
@@ -299,17 +300,42 @@ static ScanPacketKind_t Scan_ClassifyPacket(const uint8_t *packet,
  * Valid NAK requests no ACK/NAK response. RESEND asks to retransmit the same
  * command with the status bit; it does not silently authorize a new operation.
  */
-static uint16_t Scan_WaitControlReply(bool *resend) {
+static uint32_t Scan_MsToTicks(uint32_t ms) {
+    return (uint32_t)(((uint64_t)ms * osKernelGetTickFreq()) / 1000U);
+}
+
+static uint32_t Scan_DeadlineRemaining(TickType_t deadline) {
+    const int32_t diff = (int32_t)(deadline - osKernelGetTickCount());
+    return diff > 0 ? (uint32_t)diff : 0U;
+}
+
+static uint32_t Scan_DeadlineRemainingMs(TickType_t deadline)
+{
+    uint32_t remaining = Scan_DeadlineRemaining(deadline);
+    uint32_t frequency = osKernelGetTickFreq();
+    if (frequency == 0U)
+        return 0U;
+    return (uint32_t)(((uint64_t)remaining * 1000U) / frequency);
+}
+
+static uint32_t Scan_DeadlineToHalMs(TickType_t deadline)
+{
+    return HAL_GetTick() + Scan_DeadlineRemainingMs(deadline);
+}
+
+static uint16_t Scan_WaitControlReply(bool *resend, TickType_t deadline) {
     uint8_t packet[7];
     uint16_t used = 0U;
-    const uint32_t started = osKernelGetTickCount();
-    const uint32_t duration = (uint32_t) (((uint64_t)
-            SCAN_SSI_RESPONSE_TIMEOUT_MS * osKernelGetTickFreq()) / 1000U);
+    const TickType_t started = osKernelGetTickCount();
+    TickType_t reply_deadline = started
+            + (TickType_t)Scan_MsToTicks(SCAN_SSI_RESPONSE_TIMEOUT_MS);
+    if ((int32_t)(reply_deadline - deadline) > 0)
+        reply_deadline = deadline;
     *resend = false;
 
     // --- One bounded reply; reset is finalized by the caller's domain path ---
     while (!AppSafety_IsResetPending()
-            && (uint32_t) (osKernelGetTickCount() - started) < duration) {
+            && (int32_t)(reply_deadline - osKernelGetTickCount()) > 0) {
         uint16_t length;
         bool error;
         const uint8_t *received = ScanUart_GetReceived(&length, &error);
@@ -324,7 +350,7 @@ static uint16_t Scan_WaitControlReply(bool *resend) {
                 continue;
 
             SsiMsg_t message;
-            if ((uint32_t) (osKernelGetTickCount() - started) >= duration
+            if ((int32_t)(reply_deadline - osKernelGetTickCount()) <= 0
                     || !Ssi_Decode(packet, used, &message)
                     || message.msg_src != SSI_MSG_SRC_DECODER
                     || (message.status & (uint8_t) ~SSI_STATUS_RETRANSMIT) != 0U)
@@ -353,21 +379,29 @@ static uint16_t Scan_WaitControlReply(bool *resend) {
  * Only an explicit decoder RESEND permits retransmission. Timeout is not
  * treated as proof that the command was rejected. A failed boundary forbids START.
  */
-static uint16_t Scan_RunPreparationCommand(uint8_t opcode) {
+static uint16_t Scan_RunPreparationCommand(uint8_t opcode, TickType_t deadline) {
+    const uint32_t response_ticks =
+            Scan_MsToTicks(SCAN_SSI_RESPONSE_TIMEOUT_MS);
+
     for (uint32_t attempt = 0U; attempt <= SCAN_SSI_HOST_RESENDS; ++attempt) {
+        if (Scan_DeadlineRemaining(deadline) == 0U)
+            return CAN_ERR_SCAN_COMM;
+        if (attempt > 0U && Scan_DeadlineRemaining(deadline) < response_ticks)
+            return CAN_ERR_SCAN_COMM;
+
         if (!ScanUart_BeginRead())
             return CAN_ERR_SCAN_COMM;
 
         uint8_t packet[6];
         uint8_t length = Ssi_EncodeWithStatus(opcode,
                 attempt == 0U ? 0U : SSI_STATUS_RETRANSMIT, NULL, 0U, packet);
-        if (!ScanUart_Wake() || !ScanUart_SendForReply(packet, length)) {
+        if (!ScanUart_Wake() || !ScanUart_SendForReplyDeadline(packet, length, Scan_DeadlineToHalMs(deadline))) {
             (void) ScanUart_EndRead();
             return CAN_ERR_SCAN_COMM;
         }
 
         bool resend;
-        uint16_t result = Scan_WaitControlReply(&resend);
+        uint16_t result = Scan_WaitControlReply(&resend, deadline);
         if (!ScanUart_EndRead())
             return CAN_ERR_SCAN_COMM;
         if (AppSafety_IsResetPending())
@@ -384,11 +418,11 @@ static uint16_t Scan_RunPreparationCommand(uint8_t opcode) {
  * queued packets were eliminated. Neither MCU buffer reset nor START ACK alone
  * establishes this boundary. Physical support remains subject to BENCH.
  */
-static uint16_t Scan_PrepareRead(void) {
-    uint16_t result = Scan_RunPreparationCommand(SSI_OP_STOP_DECODE);
+static uint16_t Scan_PrepareRead(TickType_t deadline) {
+    uint16_t result = Scan_RunPreparationCommand(SSI_OP_STOP_DECODE, deadline);
     if (result != CAN_ERR_NONE)
         return result;
-    return Scan_RunPreparationCommand(SSI_OP_FLUSH_QUEUE);
+    return Scan_RunPreparationCommand(SSI_OP_FLUSH_QUEUE, deadline);
 }
 
 // --- Read-only revision probe or single BEEP: DONE means RX capture complete ---
@@ -587,7 +621,9 @@ void app_start_task_scan_controller(void *argument) {
 		}
 
 		// --- Confirmed module-side boundary before a new reading ---
-		uint16_t prepare_error = Scan_PrepareRead();
+		const TickType_t prep_deadline = osKernelGetTickCount()
+				+ (TickType_t) Scan_MsToTicks(SCAN_SSI_PREP_BUDGET_MS);
+		uint16_t prepare_error = Scan_PrepareRead(prep_deadline);
 		if (prepare_error != CAN_ERR_NONE) {
 			if (Scan_SyncResetState() || !Scan_TryAcceptTerminalResult()) {
 				(void) Scan_SyncResetState();
@@ -611,10 +647,17 @@ void app_start_task_scan_controller(void *argument) {
 			continue;
 		}
 
+		if (Scan_DeadlineRemaining(prep_deadline) == 0U) {
+			(void) ScanUart_EndRead();
+			ScanCtrl_HandleTransportError();
+			CAN_SendNackPublic(cmd.cmd_code, CAN_ERR_SCAN_COMM);
+			continue;
+		}
+
 		// --- Отправка START_DECODE ---
 		ssi_len = Ssi_Encode(SSI_OP_START_DECODE, NULL, 0, ssi_packet);
 		// Retain this attempt separately from the subsequent STOP_DECODE.
-		if (!ScanUart_Wake() || !ScanUart_SendStart(ssi_packet, ssi_len)) {
+		if (!ScanUart_Wake() || !ScanUart_SendStartDeadline(ssi_packet, ssi_len, Scan_DeadlineToHalMs(prep_deadline))) {
 			// --- Закрытие накопления при несостоявшемся запуске ---
 			(void) ScanUart_EndRead();
 
@@ -635,10 +678,13 @@ void app_start_task_scan_controller(void *argument) {
 				cmd.timeout_sec > 0U ?
 						(uint32_t) cmd.timeout_sec * 1000U : 4000U;
 		uint32_t tick_freq = osKernelGetTickFreq();
-		uint32_t timeout_ticks = (uint32_t) (((uint64_t) timeout_ms * tick_freq)
+		uint32_t read_timeout_ticks = (uint32_t) (((uint64_t) timeout_ms * tick_freq)
 				/ 1000U);
 		uint32_t slice_ticks = (500U * tick_freq) / 1000U;
-		uint32_t started = osKernelGetTickCount();
+		TickType_t read_deadline = 0U;
+		bool read_started = false;
+		const TickType_t txn_deadline = prep_deadline
+				+ (TickType_t) read_timeout_ticks;
 
 		ScanReadOutcome_t outcome = SCAN_READ_TIMEOUT;
 		bool start_acked = false;
@@ -657,10 +703,14 @@ void app_start_task_scan_controller(void *argument) {
 			if (AppSafety_IsResetPending())
 				break;
 
-			uint32_t elapsed = osKernelGetTickCount() - started;
+			const TickType_t now = osKernelGetTickCount();
+			const TickType_t deadline = read_started ? read_deadline : prep_deadline;
 
-			if (elapsed >= timeout_ticks)
+			if ((int32_t)(deadline - now) <= 0) {
+				if (!read_started)
+					outcome = SCAN_READ_TRANSPORT_ERROR;
 				break;
+			}
 
 			uint16_t received_len;
 			bool receive_error;
@@ -677,9 +727,11 @@ void app_start_task_scan_controller(void *argument) {
 				uint16_t cursor = 0U;
 
 				while (cursor < received_len) {
+					const TickType_t inner_deadline =
+							read_started ? read_deadline : prep_deadline;
 					if (AppSafety_IsResetPending()
-							|| (uint32_t) (osKernelGetTickCount() - started)
-									>= timeout_ticks)
+							|| (int32_t)(inner_deadline
+									- osKernelGetTickCount()) <= 0)
 						break;
 
 					ScanRxStep_t step = Scan_CollectPacket(received,
@@ -709,7 +761,13 @@ void app_start_task_scan_controller(void *argument) {
 					switch (kind) {
 					case SCAN_PACKET_ACK:
 						// ACK на START не завершает ожидание штрихкода.
+						// С этого момента действует срок чтения, не подготовки.
 						start_acked = true;
+						read_started = true;
+						read_deadline = osKernelGetTickCount()
+								+ (TickType_t) read_timeout_ticks;
+						if ((int32_t)(read_deadline - txn_deadline) > 0)
+							read_deadline = txn_deadline;
 						break;
 					case SCAN_PACKET_REVISION:
 						// Посторонний ответ на другую команду — не результат чтения.
@@ -723,8 +781,7 @@ void app_start_task_scan_controller(void *argument) {
 								ssi_packet);
 
 						if (!ScanUart_Wake()
-								|| !ScanUart_SendForReply(ssi_packet,
-										ssi_len)) {
+								|| !ScanUart_SendForReplyDeadline(ssi_packet, ssi_len, Scan_DeadlineToHalMs(read_started ? read_deadline : prep_deadline))) {
 							outcome = SCAN_READ_TRANSPORT_ERROR;
 							break;
 						}
@@ -735,7 +792,11 @@ void app_start_task_scan_controller(void *argument) {
 							// Повтор только для START, отклонённого до ACK:
 							// поздний NAK не должен перезапускать принятое декодирование.
 							if (start_acked
-									|| start_resends >= SCAN_SSI_HOST_RESENDS) {
+									|| start_resends >= SCAN_SSI_HOST_RESENDS
+									|| Scan_DeadlineRemaining(
+											read_started ? read_deadline : prep_deadline)
+											< Scan_MsToTicks(
+													SCAN_SSI_RESPONSE_TIMEOUT_MS)) {
 								outcome = SCAN_READ_TRANSPORT_ERROR;
 								break;
 							}
@@ -745,8 +806,7 @@ void app_start_task_scan_controller(void *argument) {
 									ssi_packet);
 
 							if (!ScanUart_Wake()
-									|| !ScanUart_SendStart(ssi_packet,
-											ssi_len)) {
+									|| !ScanUart_SendStartDeadline(ssi_packet, ssi_len, Scan_DeadlineToHalMs(read_started ? read_deadline : prep_deadline))) {
 								outcome = SCAN_READ_TRANSPORT_ERROR;
 								break;
 							}
@@ -778,12 +838,15 @@ void app_start_task_scan_controller(void *argument) {
 			}
 
 			// --- Ожидание следующих данных без перезапуска срока ---
-			elapsed = osKernelGetTickCount() - started;
+			const TickType_t wait_deadline =
+					read_started ? read_deadline : prep_deadline;
+			const uint32_t remaining = Scan_DeadlineRemaining(wait_deadline);
 
-			if (elapsed >= timeout_ticks)
+			if (remaining == 0U) {
+				if (!read_started)
+					outcome = SCAN_READ_TRANSPORT_ERROR;
 				break;
-
-			uint32_t remaining = timeout_ticks - elapsed;
+			}
 			uint32_t wait_ticks =
 					remaining < slice_ticks ? remaining : slice_ticks;
 

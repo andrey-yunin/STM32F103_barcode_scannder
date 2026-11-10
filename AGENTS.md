@@ -21,7 +21,7 @@ HOST, BUILD and BENCH evidence are distinct. Never mark a block unified merely
 because it builds. Preserve user changes and historical documentation.
 
 Current plan:
-[Scanner unification plan](../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_UNIFICATION_PLAN_20261028.md).
+[Scanner unification plan](../DDS-240_readme/DDS-240_eko_system/Scanner/archive/SCANNER_UNIFICATION_PLAN_20261028.md).
 The plan title defines the local task: **Scanner — audit and unification of
 common layers**, not a single defect. Target board: Scanner (NodeID 0x60,
 family 60..6F). Reference boards and pinned sources:
@@ -48,23 +48,27 @@ App/src/tasks/task_scan_controller.c and App/src/scan_controller.c
 U21-A/B addressed; U21-C CODE+BUILD (checked osDelay -> Error_Handler,
 SCAN_CAPTURE_WINDOW_MS/POLL_MS); typed outcome CODE+BUILD (ScanReadOutcome_t,
 terminal switch preserves E601/E602/E603 priority). Debug incremental BUILD
-PASS (49380/72/15136, 0 errors/0 warnings), ELF SHA256
-bbe6687d4f5a990b1041ffad2f93cce4834e05cb2b31cad2cc8906a38b9b0bfc.
-HOST SSI codec and controller PASS; HOST task-loop NOT RUN.
+PASS (50196/72/15136, 0 errors/0 warnings), ELF SHA256
+887a0b3800db211d344ecf5898afef945fed3cb92bc2411f02158305e4e9ec23.
 Release/BENCH NOT RUN; actual FLUSH/EE=1/ACK-NAK/module settings unverified.
-Remaining U21/U22: common transaction deadline, full RX-event ownership/
-fragment assembly, multipacket conditional. STOP/terminal is DECIDED by
-SCANNER_EXECUTOR_REPORT.md:2734-2735/2075: success sends no STOP; ordinary
+Remaining U21/U22: full RX-event
+ownership/fragment assembly, multipacket conditional. STOP/terminal is DECIDED by
+archive/SCANNER_EXECUTOR_REPORT.md:2734-2735/2075: success sends no STOP; ordinary
 error sends CAN terminal then the existing trailing STOP; no STOP ACK wait;
 no reorder; reset remains a separate STOP-only path.
 This block is closed in report/plan/NEXT/README and committed with explicit
-permission. Next: continue the U-matrix (common deadline / RX ownership, not
-STOP). The common preparation+START+read deadline has no reference precedent
-in HC/Thermo/Fluidics and requires an explicit user policy decision first. No new START after its ACK;
-local retransmission is not a new CAN operation. Preparation adds time before
-START; Studio timeout+7 integration remains OPEN. No broad TX deadline, Studio
-changes or hardware actions are authorized. Consultation, exact source
-comparison and manual code workflow remain in force.
+permission. Normative document: `readme/SCANNER.md`; it wins over
+plan/report/NEXT on disagreement. Common deadline 0601 is DECIDED 10.11.2026
+(P1b): absolute transaction limit t0 + 6000 ms preparation budget +
+read_timeout; each control wait min(2000, remaining); no retry on response
+timeout, retransmit only on explicit NAK RESEND; read deadline not reset by
+packets; E602 prep, E603 read; worst failure path target 10 s at 4 s, fits
+Studio timeout+7 s. CODE IMPLEMENTED (working tree; build PASS 50196/72/15136); as-built protocol worst is 16 s
+(STOP 6 + FLUSH 6 + read 4), not 22 s, and there is no hard bound because
+driver sends block. No new START after its ACK; local retransmission is not a
+new CAN operation. No firmware edit, Studio change, commit or hardware action
+is authorized by this decision.
+Consultation, exact source comparison and manual code workflow remain in force.
 
 ## Industrial baseline — стабильное правило
 - HC/Thermo/Fluidics — фактический промышленный baseline проекта.
@@ -82,8 +86,55 @@ comparison and manual code workflow remain in force.
 - Новая сессия, найдя кандидатный патч, не превращает его в требование:
   сначала ищет эталонную реализацию или нормативный источник.
 
+
+## Documentation discipline — hard rules
+
+Active documents only:
+- `readme/SCANNER.md` — sole current specification; size follows content, not a line budget.
+- `readme/SCANNER_PLAN.md` — sole current plan; size follows content, not a line budget.
+- `archive/SCANNER_EXECUTOR_REPORT.md`, `archive/SCANNER_UNIFICATION_PLAN_20261028.md`,
+  `archive/NEXT_SESSION_PROMPT.md` are archive. Never edit them as current, never use
+  them to override `SCANNER.md`.
+- No second contract, no duplicate spec/plan, no new document without explicit
+  permission.
+
+1. Separation. SCANNER.md = current behavior + target + deviations.
+   SCANNER_PLAN.md = tasks, decisions, acceptance, status. No dates, no diary,
+   no meeting log in either. History lives in git and the archive.
+2. Traceability. Every normative claim cites code file:line, a named test, or
+   an external source with document/section. If unverified, write
+   "requires bench" and do not present it as fact.
+3. Target vs as-built. Any unimplemented target is explicitly marked
+   "target, not implemented". Never describe a target as current behavior.
+4. Status. `[x]` only after acceptance evidence; `[~]` decided but not
+   implemented; `[ ]` not started; `[!]` waiting for a decision. Update the
+   plan in the same commit as the work.
+5. One work at a time. Before code, update the plan task/decision. After code,
+   update SCANNER.md and the plan in the same commit. Docs sync is part of
+   "done"; a build alone is not.
+6. No silent reversals. A new decision explicitly supersedes the old one,
+   names the affected sections, and gives the reason. Do not leave both
+   versions looking current.
+7. Ecosystem gate. Common layers follow the pinned references and the
+   ecosystem standard. Scanner domain specifics (SSI, UART handshake, wake,
+   0601/0602/0603/0604 timing) are marked "board-specific"; they are not
+   deviations and do not require a reference precedent. Never invent a P0.
+8. Completeness gate. SCANNER.md is complete only if it contains: every CAN
+   command with payload, validation, response and NACK; tasks, priorities,
+   stacks and queues; config/Flash layout; startup order; diagnostics;
+   reset/safety; verification (CODE/HOST/BUILD/BENCH); reference map. The plan
+   is complete only if every task has files, acceptance and status. No dates,
+   no diary, no duplication. Size is a consequence, not a target; never cut a
+   required section to satisfy a line count, and never raise a line limit to
+   avoid a content decision.
+9. Pre-done audit. Before declaring docs done: grep for stale markers
+   ("not implemented", "TODO", "TBD", old hashes, old 22 s wording), verify
+   `git status`, and report CODE/HOST/BUILD/BENCH separately. Build does not
+   prove behavior.
+10. Commit only with explicit permission.
+
 Historical handoff (superseded by Nov 6): verified 2026-11-05;
-see canonical Scanner/NEXT_SESSION_PROMPT.md
+see canonical Scanner/archive/NEXT_SESSION_PROMPT.md
 and the final 2026-11-03 entry in the unification plan. F002/F006 controlled
 STOP-only preparation IS installed in seven uncommitted App files over ea1eacb.
 It uses a shared 3000 ms budget from the first latch, validates the first STOP
@@ -100,7 +151,7 @@ Consultation/manual firmware editing rules remain in force. No new firmware,
 configuration, commit, flash, hardware command or delegation authorization.
 
 Historical stop (superseded by the verified Nov 5 handoff): end of 2026-11-02;
-see canonical Scanner/NEXT_SESSION_PROMPT.md
+see canonical Scanner/archive/NEXT_SESSION_PROMPT.md
 and readme/checkpoints/20261102/. RX/TX USART3 now use UART interrupts; RX
 pending storage is 128 bytes. Both DMA channels were removed by the user in
 Cube. RX close/error handling and no STOP after success have scoped HOST13
@@ -118,7 +169,7 @@ edits, configuration changes, commits, flashing or hardware commands.
 Give exact manual code blocks; do not offer git apply as the editing workflow.
 Do not delegate without the user's request.
 
-Historical stop (superseded by 2026-11-02): end of 2026-10-30; see canonical Scanner/NEXT_SESSION_PROMPT.md
+Historical stop (superseded by 2026-11-02): end of 2026-10-30; see canonical Scanner/archive/NEXT_SESSION_PROMPT.md
 and repository readme/checkpoints/20261030/. D/E and outgoing SSI ACK have
 scoped CODE/HOST/BUILD evidence. Scan_CollectPacket assembles packets delivered
 to the task; U22 remains open for preserving RX events before task consumption.

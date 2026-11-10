@@ -374,12 +374,25 @@ static void ScanUart_AbortTx(void) {
 // Перед каждым байтом проверяется разрешение RTS.
 // Последний TxCpltCallback фиксирует завершение START
 // и отпускает CTS после фактического окончания передачи UART.
+static uint32_t ScanUart_DeadlineRemainingMs(uint32_t deadline_ms)
+{
+    if (deadline_ms == 0U)
+        return 0xFFFFFFFFU;
+    int32_t remaining = (int32_t)(deadline_ms - HAL_GetTick());
+    return remaining > 0 ? (uint32_t)remaining : 0U;
+}
+
+static uint32_t ScanUart_MinTimeout(uint32_t configured, uint32_t remaining)
+{
+    return configured < remaining ? configured : remaining;
+}
+
 static bool ScanUart_SendInternal(const uint8_t *data, uint16_t len,
-bool track_start, bool reset_stop) {
+bool track_start, bool reset_stop, uint32_t deadline_ms) {
 	if (data == NULL || len == 0U || len > 134U)
 		return false;
 	// The preceding transaction must have released its grant before a new one.
-	if (!ScanUart_WaitRts(GPIO_PIN_SET, 2000U, reset_stop))
+	if (!ScanUart_WaitRts(GPIO_PIN_SET, ScanUart_MinTimeout(2000U, ScanUart_DeadlineRemainingMs(deadline_ms)), reset_stop))
 		return false;
 
 	// --- Атомарная проверка запрета и запрос передачи ---
@@ -401,8 +414,7 @@ bool track_start, bool reset_stop) {
 	bool success = false;
 	for (uint16_t i = 0; i < len; ++i) {
 		// Bound character gaps below the default 200 ms intercharacter timeout.
-		if (!ScanUart_WaitRts(GPIO_PIN_RESET, i == 0U ? 2000U : 100U,
-				reset_stop))
+		if (!ScanUart_WaitRts(GPIO_PIN_RESET, ScanUart_MinTimeout(i == 0U ? 2000U : 100U, ScanUart_DeadlineRemainingMs(deadline_ms)), reset_stop))
 			break;
 		// --- Атомарный запрет запуска следующего UART-байта ---
 		uint32_t irq_state = __get_PRIMASK();
@@ -448,7 +460,9 @@ bool track_start, bool reset_stop) {
 		// --- Ожидание завершения байта с проверкой отмены ---
 		uint32_t started = HAL_GetTick();
 
-		while (!tx_byte_done && (uint32_t) (HAL_GetTick() - started) < 100U) {
+		uint32_t byte_timeout = ScanUart_MinTimeout(100U, ScanUart_DeadlineRemainingMs(deadline_ms));
+
+		while (!tx_byte_done && (uint32_t) (HAL_GetTick() - started) < byte_timeout) {
 			if (!ScanUart_IsTxAllowed(reset_stop))
 				break;
 
@@ -470,12 +484,12 @@ bool track_start, bool reset_stop) {
 	HAL_GPIO_WritePin(CTS_GPIO_Port, CTS_Pin, GPIO_PIN_SET);
 	if (!success)
 		return false;
-	return ScanUart_WaitRts(GPIO_PIN_SET, 2000U, reset_stop);
+	return ScanUart_WaitRts(GPIO_PIN_SET, ScanUart_MinTimeout(2000U, ScanUart_DeadlineRemainingMs(deadline_ms)), reset_stop);
 }
 
 // --- Normal commands never replace the retained START snapshot ---
 bool ScanUart_Send(const uint8_t *data, uint16_t len) {
-	return ScanUart_SendInternal(data, len, false, false);
+	return ScanUart_SendInternal(data, len, false, false, 0U);
 }
 
 /*
@@ -484,7 +498,7 @@ bool ScanUart_Send(const uint8_t *data, uint16_t len) {
  * RX remains armed and read errors remain latched while old bytes are drained.
  * No ordinary byte may be launched after reset latch.
  */
-bool ScanUart_SendForReply(const uint8_t *data, uint16_t len) {
+static bool ScanUart_SendForReplyInternal(const uint8_t *data, uint16_t len, uint32_t deadline_ms) {
 	// --- Require the existing read owner and ordinary UART admission ---
 	if (data == NULL || len == 0U || len > 134U)
 		return false;
@@ -506,7 +520,7 @@ bool ScanUart_SendForReply(const uint8_t *data, uint16_t len) {
 		return false;
 
 	// --- Existing TX/abort/CTS handling, with the ordinary reset gate ---
-	bool sent = ScanUart_SendInternal(data, len, false, false);
+	bool sent = ScanUart_SendInternal(data, len, false, false, deadline_ms);
 
 	const uint32_t cleanup_primask = __get_PRIMASK();
 	__disable_irq();
@@ -517,8 +531,24 @@ bool ScanUart_SendForReply(const uint8_t *data, uint16_t len) {
 }
 
 // --- Explicit domain hook avoids guessing START from arbitrary UART bytes ---
-bool ScanUart_SendStart(const uint8_t *data, uint16_t len) {
-	return ScanUart_SendInternal(data, len, true, false);
+bool ScanUart_SendForReply(const uint8_t *data, uint16_t len)
+{
+    return ScanUart_SendForReplyInternal(data, len, 0U);
+}
+
+bool ScanUart_SendForReplyDeadline(const uint8_t *data, uint16_t len, uint32_t deadline_ms)
+{
+    return ScanUart_SendForReplyInternal(data, len, deadline_ms);
+}
+
+bool ScanUart_SendStart(const uint8_t *data, uint16_t len)
+{
+    return ScanUart_SendInternal(data, len, true, false, 0U);
+}
+
+bool ScanUart_SendStartDeadline(const uint8_t *data, uint16_t len, uint32_t deadline_ms)
+{
+    return ScanUart_SendInternal(data, len, true, false, deadline_ms);
 }
 
 /*
@@ -568,7 +598,7 @@ bool ScanUart_SendStopForReset(const uint8_t *data, uint16_t len) {
 
     // --- Новый handshake завершает прежнюю передачу и даёт STOP приоритет ---
     // Накопление ACK откроет TxCpltCallback перед отпусканием CTS.
-    return ScanUart_SendInternal(data, len, false, true);
+    return ScanUart_SendInternal(data, len, false, true, 0U);
 }
 
 /*
