@@ -1,8 +1,0 @@
-{
-  "exit_code": 0,
-  "warnings": 0,
-  "errors": 0,
-  "scope": "Debug incremental build with actual working tree; no flashing/BENCH",
-  "elf_sha256": "c49136c7eb6ef9356fe46511225587141dbe0042bbf11d768488457f1252ac75",
-  "size": "   text\t   data\t    bss\t    dec\t    hex\tfilename\n  45740\t     68\t  15128\t  60936\t   ee08\t/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/Debug/STM32F103_scanner.elf\n"
-}

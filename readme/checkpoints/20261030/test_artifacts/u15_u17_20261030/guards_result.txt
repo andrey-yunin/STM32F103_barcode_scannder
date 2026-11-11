@@ -1,1 +1,0 @@
-HOST PASS: extracted actual queue/thread guard blocks; all32 NULL/non-NULL combinations. Mock safe-state/fatal; no real allocations or scheduler.

@@ -1,8 +1,0 @@
-{
-  "App/src/app_safety.c": "a3eee161e52f2e1760bc23d4931674e6c349e7eb1bfb9d4eb51f00736bc76298",
-  "App/src/scan_uart_driver.c": "c1e44993ccb5a39b851530b11ed2227ceddff41c009fc3d19fa65c4935acdbdf",
-  "App/src/scan_controller.c": "a89355e1342806a14513a712214014788231a714ff9102a87edcb2f3aa8985fc",
-  "App/src/scan_ssi.c": "8fe144a643f8b0ea95afb889e68497e6cca5e8411fe74c7622ec89f927b95353",
-  "App/src/tasks/task_scan_controller.c": "f999e35a1552f04b0eac49038ad9f3f4e262f95d04bc065348dbbd7409f6ba05",
-  "App/src/tasks/task_dispatcher.c": "d204f75c7efa09c4fdc30ef0d84cb3162511548ec65c2dd20d0287c5eca6197a"
-}

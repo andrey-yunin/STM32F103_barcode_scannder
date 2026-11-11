@@ -256,7 +256,7 @@ PASS (leak checking disabled for ptrace); SSI codec tests PASS. Debug build PASS
 text41348/data68/bss14776, no warnings. Assistant did not flash hardware.
 MCU configuration checked: PB10 TX/PB11 RX, 115200 8N1, no hardware flow control;
 USART3 and DMA RX IRQ handlers call HAL. Actual module baud/control wiring
-remain unconfirmed. Build log: test_artifacts/ssi_codec_20261027/retry_build.log.
+remain unconfirmed. Build log: `DDS-240_readme/DDS-240_eko_system/Scanner/archive/test_artifacts/ssi_codec_20261027/retry_build.log`.
 
 ### 27.10.2026 — UART-only board, explicit wake before commands
 
@@ -283,7 +283,7 @@ Host verifier tests actual driver with HAL stubs: raw byte, bounded transmit,
 settle delay on success only, failure branches and retained START snapshot;
 existing D502 encoding/ownership tests also pass. Controller retry/transport
 error test passes. Build passes without warnings: text42004/data68/bss14776.
-Artifacts: test_artifacts/uart_wake_20261027/{verify_wake.py,host_test.log,build.log}.
+Artifacts: `DDS-240_readme/DDS-240_eko_system/Scanner/archive/test_artifacts/uart_wake_20261027/` {verify_wake.py, host_test.log, build.log}.
 Assistant did not flash the board. Next: read RX after boot, then issue one
 SCAN_REQUEST and read RX/TX. Any ACK/NAK bytes are valuable even if CAN reports
 hardware error due to the existing first-RX processing.
@@ -330,7 +330,7 @@ vector passes. New Studio tests cover real command button -> controller ->
 transport -> assembler -> device log, missing frames and malformed envelopes.
 Firmware build PASS without warnings: text42916/data68/bss15120. Hardware
 revision reply remains unverified; assistant did not flash hardware.
-Artifacts: Scanner/test_artifacts/revision_20261027/.
+Artifacts: `DDS-240_readme/DDS-240_eko_system/Scanner/archive/test_artifacts/revision_20261027/`.
 
 
 ## 2026-10-27 — одиночный BEEP, CAN 0x0604
@@ -481,10 +481,10 @@ IRQ-safe snapshot, CAN IRQ diagnostics и TX wrapper; DATA sequence/F004 UID,
 F007 handler; RTOS outcome heartbeat и общий deadline UART; загрузка config
 по механизму Thermo, Commit/FactoryReset по HC с проверкой HAL-стадий.
 F006 теперь учитывает bool Flash, но PrepareReset/safe-state ещё не перенесён.
-CODE/HOST/BUILD и открытые BENCH подробно разделены в снимке документации:
-[план](readme/checkpoints/20261029/SCANNER_UNIFICATION_PLAN_20261028.md),
-[отчёт](readme/checkpoints/20261029/SCANNER_EXECUTOR_REPORT.md),
-[точка останова](readme/checkpoints/20261029/NEXT_SESSION_PROMPT.md).
+CODE/HOST/BUILD и открытые BENCH подробно разделены в документах:
+[план](../../DDS-240_readme/DDS-240_eko_system/Scanner/archive/SCANNER_UNIFICATION_PLAN_20261028.md),
+[отчёт](../../DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER_EXECUTOR_REPORT.md),
+[точка останова](../../DDS-240_readme/DDS-240_eko_system/Scanner/NEXT_SESSION_PROMPT.md).
 Сборка29.10 без ошибок/предупреждений: text45260/data68/bss15120.
 
 Уточнение записи28.10 выше: внесённый тогда ассистентом SSI handshake остаётся

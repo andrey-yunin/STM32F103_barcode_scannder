@@ -1,1 +1,0 @@
-PASS: actual scan queue wait matches HC with named domain adaptations; OK/timeout/Resource/Parameter paths

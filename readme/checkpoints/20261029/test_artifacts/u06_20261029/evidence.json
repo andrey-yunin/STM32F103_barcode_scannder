@@ -1,7 +1,0 @@
-{
-  "source_sha256": "9494d8a00212160fd9070e0ff37c513b65ab14cf6d9aa3425b08596979c6797f",
-  "function_matches_HC": true,
-  "test": "extracted actual function compiled with IRQ stubs",
-  "build": "user reports clean",
-  "bench": "NOT RUN"
-}

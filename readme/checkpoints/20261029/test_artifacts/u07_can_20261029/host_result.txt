@@ -1,1 +1,0 @@
-PASS: actual CAN wait block matches HC; RX/TX/both and idle timeout heartbeat; Resource/Parameter errors do not heartbeat or enter processing

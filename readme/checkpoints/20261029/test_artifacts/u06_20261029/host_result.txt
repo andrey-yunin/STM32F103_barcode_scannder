@@ -1,1 +1,0 @@
-PASS: HC code equality; PRIMASK 0/1 restored, copy under IRQ mask, complete snapshot, NULL has no effects

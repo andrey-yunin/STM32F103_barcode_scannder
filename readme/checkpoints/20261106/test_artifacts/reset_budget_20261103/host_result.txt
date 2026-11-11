@@ -1,2 +1,0 @@
-PASS actual app_safety: inactive state, PRIMASK0/1, latch/safe GPIO, 2999/3000ms, repeated request, tick wrap
-HOST HAL model only; Dispatcher/STOP not changed by this block; no BENCH

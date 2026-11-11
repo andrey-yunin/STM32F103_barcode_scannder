@@ -1,1 +1,0 @@
-PASS: exact HC Commit/FactoryReset; mutex, Unlock/Erase/each Program/Lock failure paths; 16-byte layout+CRC; reset preserves RAM; F006 key/DONE/NACK/reset. HOST stubs only; no physical Flash readback.

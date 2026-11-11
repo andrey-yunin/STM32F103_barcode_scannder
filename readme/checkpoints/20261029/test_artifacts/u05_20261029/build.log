@@ -1,7 +1,0 @@
-make: Entering directory '/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/Debug'
-arm-none-eabi-size  STM32F103_scanner.elf 
-   text	   data	    bss	    dec	    hex	filename
-  45052	     68	  15120	  60240	   eb50	STM32F103_scanner.elf
-Finished building: default.size.stdout
- 
-make: Leaving directory '/home/andrey/STM32CubeIDE/workspace_1.19.0/STM32F103_scanner/Debug'

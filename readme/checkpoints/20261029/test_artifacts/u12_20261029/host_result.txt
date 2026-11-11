@@ -1,1 +1,0 @@
-PASS: valid60/6F load, invalid family/magic/CRC defaults, mutex failure/reuse, reserved/layout/checksum preserved, Flash unchanged

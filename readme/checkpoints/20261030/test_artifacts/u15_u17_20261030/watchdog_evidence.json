@@ -1,9 +1,0 @@
-{
-  "sha256": {
-    "App/src/tasks/task_watchdog.c": "f9ccde22f33ae316e4786d879ac1df95b7def2bdc995239dec6034156a9162ac",
-    "App/inc/tasks/task_watchdog.h": "07286e1a9bf6eda810b09f261136d235faff653c6758d829ca8ecc98c5f7e2d0",
-    "Core/Src/main.c": "909966e6d040394b4a9325cd0426cb8e286fd10c58367fb714e9eeabc65afe31",
-    "STM32F103_scanner.ioc": "9aec233790bd75d18284f80deace0992e8714e46460045f6af56ff7acafba8c8"
-  },
-  "limits": "Mock RTOS/IWDG; no MCU connection, preemption or hardware reset."
-}

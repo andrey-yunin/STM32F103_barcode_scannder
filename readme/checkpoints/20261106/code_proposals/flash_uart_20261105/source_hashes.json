@@ -1,5 +1,0 @@
-{
-  "App/inc/tasks/task_scan_controller.h": "e41fcb463449869768dcc8e8f7bcc7fa7988281996276f3ed0b6f388917a887c",
-  "App/src/tasks/task_scan_controller.c": "f999e35a1552f04b0eac49038ad9f3f4e262f95d04bc065348dbbd7409f6ba05",
-  "App/src/tasks/task_dispatcher.c": "d204f75c7efa09c4fdc30ef0d84cb3162511548ec65c2dd20d0287c5eca6197a"
-}

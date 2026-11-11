@@ -53,17 +53,18 @@ PASS (50196/72/15136, 0 errors/0 warnings), ELF SHA256
 Release/BENCH NOT RUN; actual FLUSH/EE=1/ACK-NAK/module settings unverified.
 Remaining U21/U22: full RX-event
 ownership/fragment assembly, multipacket conditional. STOP/terminal is DECIDED by
-archive/SCANNER_EXECUTOR_REPORT.md:2734-2735/2075: success sends no STOP; ordinary
+Scanner/SCANNER_EXECUTOR_REPORT.md:2734-2735/2075: success sends no STOP; ordinary
 error sends CAN terminal then the existing trailing STOP; no STOP ACK wait;
 no reorder; reset remains a separate STOP-only path.
 This block is closed in report/plan/NEXT/README and committed with explicit
-permission. Normative document: `readme/SCANNER.md`; it wins over
+permission. Normative document: `DDS-240_readme/DDS-240_eko_system/Scanner/SCANNER.md`;
+it wins over
 plan/report/NEXT on disagreement. Common deadline 0601 is DECIDED 10.11.2026
 (P1b): absolute transaction limit t0 + 6000 ms preparation budget +
 read_timeout; each control wait min(2000, remaining); no retry on response
 timeout, retransmit only on explicit NAK RESEND; read deadline not reset by
 packets; E602 prep, E603 read; worst failure path target 10 s at 4 s, fits
-Studio timeout+7 s. CODE IMPLEMENTED (working tree; build PASS 50196/72/15136); as-built protocol worst is 16 s
+Studio timeout+7 s. CODE IMPLEMENTED and committed in `477062b` (build PASS 50196/72/15136); as-built protocol worst is 16 s
 (STOP 6 + FLUSH 6 + read 4), not 22 s, and there is no hard bound because
 driver sends block. No new START after its ACK; local retransmission is not a
 new CAN operation. No firmware edit, Studio change, commit or hardware action
@@ -76,8 +77,6 @@ Consultation, exact source comparison and manual code workflow remain in force.
   Не заявлять «эталоны P0» или «эталоны не P0» без полного аудита.
 - Scanner сравнивается только с фактической реализацией эталонов
   и своими SSI/Zebra-требованиями.
-- Кандидатные патчи `readme/checkpoints/.../code_proposals/` —
-  подготовка, не эталон и не требование.
 - Пункт P0 для Scanner — только если тот же механизм есть в промышленной
   реализации эталона или прямо требуется `DDS-240_ECOSYSTEM_STANDARD.md`
   / `DDS240-ACCEPT-1`.
@@ -90,11 +89,14 @@ Consultation, exact source comparison and manual code workflow remain in force.
 ## Documentation discipline — hard rules
 
 Active documents only:
-- `readme/SCANNER.md` — sole current specification; size follows content, not a line budget.
-- `readme/SCANNER_PLAN.md` — sole current plan; size follows content, not a line budget.
-- `archive/SCANNER_EXECUTOR_REPORT.md`, `archive/SCANNER_UNIFICATION_PLAN_20261028.md`,
-  `archive/NEXT_SESSION_PROMPT.md` are archive. Never edit them as current, never use
-  them to override `SCANNER.md`.
+Active documents live in the shared folder `DDS-240_readme/DDS-240_eko_system/Scanner/`:
+- `SCANNER.md` — sole current specification; size follows content, not a line budget.
+- `SCANNER_PLAN.md` — sole current plan; size follows content, not a line budget.
+- `NEXT_SESSION_PROMPT.md` — session entry point: current state at the top, everything
+  below `## Архив до …` is history.
+- `SCANNER_EXECUTOR_REPORT.md` — журнал работ (только дописывание).
+- `archive/SCANNER_UNIFICATION_PLAN_20261028.md` — архив. Никогда не править как текущий,
+  не использовать для переопределения `SCANNER.md`.
 - No second contract, no duplicate spec/plan, no new document without explicit
   permission.
 
@@ -134,7 +136,7 @@ Active documents only:
 10. Commit only with explicit permission.
 
 Historical handoff (superseded by Nov 6): verified 2026-11-05;
-see canonical Scanner/archive/NEXT_SESSION_PROMPT.md
+see canonical Scanner/NEXT_SESSION_PROMPT.md
 and the final 2026-11-03 entry in the unification plan. F002/F006 controlled
 STOP-only preparation IS installed in seven uncommitted App files over ea1eacb.
 It uses a shared 3000 ms budget from the first latch, validates the first STOP
@@ -151,8 +153,7 @@ Consultation/manual firmware editing rules remain in force. No new firmware,
 configuration, commit, flash, hardware command or delegation authorization.
 
 Historical stop (superseded by the verified Nov 5 handoff): end of 2026-11-02;
-see canonical Scanner/archive/NEXT_SESSION_PROMPT.md
-and readme/checkpoints/20261102/. RX/TX USART3 now use UART interrupts; RX
+see canonical Scanner/NEXT_SESSION_PROMPT.md. RX/TX USART3 now use UART interrupts; RX
 pending storage is 128 bytes. Both DMA channels were removed by the user in
 Cube. RX close/error handling and no STOP after success have scoped HOST13
 and Debug evidence (45740/68/15128); physical SSI and EE=1 are still unverified.
@@ -169,8 +170,7 @@ edits, configuration changes, commits, flashing or hardware commands.
 Give exact manual code blocks; do not offer git apply as the editing workflow.
 Do not delegate without the user's request.
 
-Historical stop (superseded by 2026-11-02): end of 2026-10-30; see canonical Scanner/archive/NEXT_SESSION_PROMPT.md
-and repository readme/checkpoints/20261030/. D/E and outgoing SSI ACK have
+Historical stop (superseded by 2026-11-02): end of 2026-10-30; see canonical Scanner/NEXT_SESSION_PROMPT.md. D/E and outgoing SSI ACK have
 scoped CODE/HOST/BUILD evidence. Scan_CollectPacket assembles packets delivered
 to the task; U22 remains open for preserving RX events before task consumption.
 The earlier driver accumulation/out_overflow proposal was deferred and not

@@ -1,8 +1,0 @@
-PASS healthy clients: startup refresh plus five verified windows
-PASS each of three stalled clients: fatal on first missing window, no further refresh
-PASS immediate and later RTOS wait failure: fatal before refresh
-PASS zero period: fatal before initial refresh
-PASS period converted from milliseconds at 100Hz and 1000Hz
-PASS counter wrap represents progress; unchanged counters fail next window
-PASS invalid heartbeat client cannot modify counters
-HOST PASS: actual supervisor/helper functions; mocked RTOS/IWDG. Real preemption, timing, safe-state and reset remain BENCH.

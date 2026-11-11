@@ -1,7 +1,0 @@
-PASS 63 snapshot splits: ACK/revision/bad-checksum/repeated F3 preserved in order
-PASS bytewise RX and retained partial packet state
-PASS SSI host NAK RESEND golden vector 05 D1 04 00 01 FF 25
-PASS NAK causes preserved; empty barcode, continuation and host-source echo cannot become success
-PASS malformed length reported without sliding resynchronization
-CONFIRMED LIMITATION: old queued first F3 and new first F3 can be byte-identical; receive parser alone cannot prove ownership
-Preparation only: task integration, RX/TX ownership, recovery deadline and module boundary NOT VERIFIED.
